@@ -289,7 +289,7 @@ export default function App() {
     }
   }, [isPowered, audioMode, isPlaying, startMic, stopMic, startAnim, pauseAnim, handlePlay]);
 
-  useEffect(() => () => { stopMic(); stopAnim(); }, []);
+  useEffect(() => () => { stopMic(); stopAnim(); }, [stopMic, stopAnim]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Layout VU ───────────────────────────────────────────────────
   const { w: PW, h: PH } = panelDims;
