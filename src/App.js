@@ -332,7 +332,7 @@ export default function App() {
     const fmX = RADIO.FM_LEFT_X + progress * (RADIO.FM_RIGHT_X - RADIO.FM_LEFT_X);
 
     return (
-      <div style={S.root}>
+      <div style={S.root} className="screen-fade">
         <div style={panelStyle(RADIO.ASPECT)}>
 
           <img src="/images/radio-panel.png" alt="Radio" style={S.bg} draggable={false} />
@@ -468,7 +468,7 @@ export default function App() {
   if (screen === 'strobe') {
     const col = STROBE_COLORS[strobeColorIdx];
     return (
-      <div style={{ width: '100vw', height: '100vh', backgroundColor: '#000', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ width: '100vw', height: '100vh', backgroundColor: '#000', position: 'relative', overflow: 'hidden' }} className="screen-fade">
 
         {/* Flash colorido — opacidade = nível de áudio */}
         <div style={{
