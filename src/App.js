@@ -204,6 +204,8 @@ export default function App() {
   const startMic = useCallback(async () => {
     try {
       ensureCtx();
+      // Desconecta analyser da saída para evitar eco do microfone
+      try { analyserRef.current?.disconnect(audioCtxRef.current.destination); } catch {}
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       micStreamRef.current = stream;
       audioCtxRef.current.createMediaStreamSource(stream).connect(analyserRef.current);
