@@ -154,11 +154,11 @@ test('display uses the approved geometry and clips its content', async () => {
   expect(screen.queryByText('VISUAL PREVIEW')).not.toBeInTheDocument();
 });
 
-test('themes cycle green, warm, red, cyan, green and persist across remounts', async () => {
+test('themes cycle green, warm, red, cyan, orange, green and persist across remounts', async () => {
   const view = await openStream();
   const display = screen.getByRole('region', { name: 'Display STREAM' });
   expect(display).toHaveAttribute('data-theme', 'green');
-  for (const theme of ['warm', 'red', 'cyan', 'green', 'warm']) {
+  for (const theme of ['warm', 'red', 'cyan', 'orange', 'green', 'warm']) {
     fireEvent.click(screen.getByRole('button', { name: /Alterar cor do display/ }));
     expect(display).toHaveAttribute('data-theme', theme);
     expect(localStorage.getItem('retro-vu.stream-theme')).toBe(theme);

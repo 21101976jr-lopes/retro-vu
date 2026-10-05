@@ -1,19 +1,13 @@
 import PwaUpdate from './PwaUpdate';
 import StreamSession from './StreamSession';
-import React, { useState } from 'react';
+import React from 'react';
+import useDigitalTheme from './useDigitalTheme';
 import './StreamDisplay.css';
 import StreamDiagnostic from './StreamDiagnostic';
 import StreamNightMode from './StreamNightMode';
 import StreamIndicators from './StreamIndicators';
 import StreamRecording from './StreamRecording';
 
-const STORAGE_KEY = 'retro-vu.stream-theme';
-const THEMES = [
-  { id: 'green', name: 'VERDE FÓSFORO', color: '#91e5a1' },
-  { id: 'warm', name: 'BRANCO QUENTE', color: '#eee0b9' },
-  { id: 'red', name: 'VERMELHO', color: '#D91A00' },
-  { id: 'cyan', name: 'AZUL-CIANO', color: '#00A6B5' },
-];
 const ISSUES = {
   'USB AUDIO NOT READY': ['ATIVE A ENTRADA', 'Toque em TRANSMITIR para iniciar a captura USB.'],
   'USB AUDIO NOT FOUND': ['USB NÃO ENCONTRADO', 'Conecte o toca-discos e toque em TRANSMITIR.'],
@@ -29,18 +23,7 @@ const ISSUES = {
 };
 
 export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture, network = {}, recording = {} }) {
-  const [themeId, setThemeId] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      return THEMES.some(theme => theme.id === saved) ? saved : 'green';
-    } catch { return 'green'; }
-  });
-  const theme = THEMES.find(item => item.id === themeId);
-  function cycleTheme() {
-    const next = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
-    setThemeId(next.id);
-    try { localStorage.setItem(STORAGE_KEY, next.id); } catch { /* Preferência opcional. */ }
-  }
+  const { theme, cycleTheme } = useDigitalTheme();
   const ready = capture.status === 'READY';
   const issue = ISSUES[capture.message] || (capture.status === 'ERROR'
     ? ['FALHA NO ÁUDIO', 'Confira a entrada USB e tente novamente.'] : null);
@@ -93,7 +76,7 @@ export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture
         <h1>{process.env.NODE_ENV === 'development' && network.role ? <StreamDiagnostic color={theme.color} /> : 'RETRO STREAM'}</h1>
         <button type="button" className="stream-terminal-theme" onClick={cycleTheme}
           aria-label={`Alterar cor do display: ${theme.name}`} title={`Cor: ${theme.name}`}>
-          <span aria-hidden="true" /></button>
+          <span aria-hidden="true" /><small>COLOR</small></button>
       </header>
       <div className="stream-terminal-rule" />
       <div className="stream-terminal-context" aria-live="polite" aria-atomic="true">

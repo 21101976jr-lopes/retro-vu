@@ -42,7 +42,7 @@
 .stream-terminal[data-state="idle"] h2 { font-size: 15cqw; }
 .stream-terminal-detail { margin: 0; font-size: 6.2cqw; line-height: 1.2; }
 .stream-terminal-technical { margin: 0; font-size: 4cqw; opacity: 0.75; }
-.stream-terminal-footer { flex-shrink: 0; border-top: 1px solid color-mix(in srgb, var(--stream-phosphor) 35%, transparent); padding-top: 2cqw; }
+.stream-terminal-footer { flex-shrink: 0; position: relative; padding-top: 2cqw; }
 .stream-terminal-bar-row { display: flex; align-items: center; gap: 4cqw; font-size: 4.5cqw; }
 .stream-terminal-segments { display: flex; flex: 1; gap: 1.2%; height: 4cqw; }
 .stream-terminal-segments i { flex: 1; border: 1px solid currentColor; opacity: 0.22; }
@@ -91,3 +91,8 @@
 .stream-terminal .stream-session-dialog h2 { font-size: 6cqw; }
 .stream-session-dialog textarea { width: 100%; box-sizing: border-box; color: inherit; background: black; font: inherit; min-height: 15cqw; }
 .stream-session-dialog button { min-height: 44px; margin: 1cqw; }
+
+/* Shorten only the rule, leaving footer contents and REC coordinates unchanged. */
+.stream-terminal-footer::before { content: ""; position: absolute; top: 0; left: 0; right: 12cqw; height: 1px; background: color-mix(in srgb, var(--stream-phosphor) 35%, transparent); pointer-events: none; }
+.stream-terminal-theme small { position: absolute; top: 50%; margin-top: 2.5cqw; font: 2.2cqw/1 monospace; letter-spacing: .08em; }
+

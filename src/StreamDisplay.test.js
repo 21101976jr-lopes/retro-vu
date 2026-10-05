@@ -46,9 +46,19 @@ test.each([
   expect(screen.getByRole('region')).toHaveAttribute('data-state', 'error');
 });
 
-test.each([['green','#91e5a1'],['warm','#eee0b9'],['red','#D91A00'],['cyan','#00A6B5']])('saved palette %s survives remount', (id,color)=>{
+test.each([['green','#91e5a1'],['warm','#eee0b9'],['red','#D91A00'],['cyan','#00A6B5'],['orange','#ff6600']])('saved palette %s survives remount', (id,color)=>{
  localStorage.setItem('retro-vu.stream-theme',id);
  const view=render(display());expect(screen.getByRole('region')).toHaveAttribute('data-theme',id);
  expect(screen.getByRole('region').style.getPropertyValue('--stream-phosphor')).toBe(color);
  view.unmount();render(display());expect(screen.getByRole('region')).toHaveAttribute('data-theme',id);
+});
+
+test('COLOR cycles all five colors and persists the selection', () => {
+ render(display());
+ expect(screen.getByText('COLOR')).toBeInTheDocument();
+ for (const id of ['warm','red','cyan','orange','green']) {
+  fireEvent.click(screen.getByRole('button', { name: /Alterar cor/ }));
+  expect(screen.getByRole('region')).toHaveAttribute('data-theme', id);
+  expect(localStorage.getItem('retro-vu.stream-theme')).toBe(id);
+ }
 });

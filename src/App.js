@@ -1,3 +1,4 @@
+import useDigitalTheme from './useDigitalTheme';
 import {setPwaBusy} from './pwa';
 import { openAudioFile } from './recording/filePicker';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -77,6 +78,7 @@ const STROBE_COLORS = [
 
 // ═══════════════════════════════════════════════════════════════════
 export default function App() {
+  const { theme: digitalTheme } = useDigitalTheme();
 
   const [screen,      setScreen]      = useState(() =>
     // TEMPORÁRIO PARA CALIBRAÇÃO: acesso direto só em desenvolvimento.
@@ -491,14 +493,14 @@ export default function App() {
             {trackName ? (
               <>
                 <span style={{
-                  color: '#ff6600', fontFamily: "'Oswald',sans-serif",
+                  color: digitalTheme.color, fontFamily: "'Oswald',sans-serif",
                   fontWeight: 400, fontSize: 'clamp(6px,.8vw,10px)',
                   opacity: 0.55, letterSpacing: 3, lineHeight: 1,
                 }}>NOW PLAYING</span>
                 <span style={{
-                  color: '#ff6600', fontFamily: "'Oswald',sans-serif",
+                  color: digitalTheme.color, fontFamily: "'Oswald',sans-serif",
                   fontWeight: 700, fontSize: 'clamp(10px,1.4vw,18px)',
-                  textShadow: '0 0 14px #ff6600',
+                  textShadow: `0 0 14px ${digitalTheme.color}`,
                   whiteSpace: 'normal', wordBreak: 'break-word',
                   textAlign: 'center', lineHeight: 1.2,
                   maxWidth: '100%', overflow: 'hidden',
@@ -509,7 +511,7 @@ export default function App() {
               </>
             ) : (
               <span style={{
-                color: '#ff6600', fontFamily: "'Oswald',sans-serif",
+                color: digitalTheme.color, fontFamily: "'Oswald',sans-serif",
                 fontWeight: 400, fontSize: 'clamp(10px,1.4vw,18px)',
                 opacity: 0.25, letterSpacing: 3,
               }}>LOAD / ABRIR</span>
@@ -525,11 +527,11 @@ export default function App() {
             pointerEvents: 'none',
           }}>
             <span style={{
-              color: '#00e87a',
+              color: digitalTheme.color,
               fontFamily: "'Oswald',monospace",
               fontWeight: 700,
               fontSize: 'clamp(16px,2.5vw,34px)',
-              textShadow: '0 0 12px #00e87a, 0 0 24px #00c060',
+              textShadow: `0 0 12px ${digitalTheme.color}, 0 0 24px ${digitalTheme.color}`,
               letterSpacing: 2,
             }}>{sensitivity}</span>
           </div>
@@ -713,14 +715,14 @@ export default function App() {
             gap: '8px', pointerEvents: 'none',
           }}>
             <span style={{
-              color: '#d4af6a', fontFamily: "'Oswald',sans-serif",
+              color: digitalTheme.color, fontFamily: "'Oswald',sans-serif",
               fontWeight: 600, fontSize: 'clamp(9px,1.2vw,16px)',
-              letterSpacing: 2, textShadow: '0 0 8px #d4af6a',
+              letterSpacing: 2, textShadow: `0 0 8px ${digitalTheme.color}`,
             }}>
               {audioMode === 'mic' ? '🎙 MIC' : '♪ PLAYER'}
             </span>
             <span style={{
-              color: '#d4af6a', fontFamily: "'Oswald',sans-serif",
+              color: digitalTheme.color, fontFamily: "'Oswald',sans-serif",
               fontWeight: 400, fontSize: 'clamp(8px,1vw,13px)',
               opacity: 0.7, letterSpacing: 1,
             }}>
