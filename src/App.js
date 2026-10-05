@@ -1,4 +1,11 @@
+import {setPwaBusy} from './pwa';
+import { openAudioFile } from './recording/filePicker';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import StreamDisplay from './StreamDisplay';
+import useStreamInput from './useStreamInput';
+import useStreamNetwork from './useStreamNetwork';
+import useStreamRecorder from './useStreamRecorder';
+import useLiveProgress from './useLiveProgress';
 
 // ═══════════════════════════════════════════════════════════════════
 // CONFIGURAÇÃO — ajuste aqui para afinar posições
@@ -50,6 +57,17 @@ const RADIO = {
   BTN_MINUS_X   : 84.85,  BTN_MINUS_T   : 61.60,  BTN_MINUS_W : 8.31,  BTN_MINUS_H : 12.46,
 };
 
+// STREAM: geometria DEFINITIVA, aprovada no Motorola. Não recalibrar.
+const STREAM = {
+  WIDTH: 3070, HEIGHT: 2048,
+  DISPLAY: { x: 234, y: 280, width: 1812, height: 1440 }, // Centro (1140, 1000); sem overlay.
+  BUTTON_X: 2600, BUTTON_W: 755, BUTTON_H: 240,
+  BUTTONS: [
+    ['TRANSMITIR', 300], ['RECEBER', 580], ['PLAY / STOP', 860],
+    ['MONITOR', 1140], ['REC', 1420], ['VOLTAR', 1700],
+  ],
+};
+
 const DAMPING = 0.12;
 
 const STROBE_COLORS = [
@@ -60,7 +78,11 @@ const STROBE_COLORS = [
 // ═══════════════════════════════════════════════════════════════════
 export default function App() {
 
-  const [screen,      setScreen]      = useState('radio');
+  const [screen,      setScreen]      = useState(() =>
+    // TEMPORÁRIO PARA CALIBRAÇÃO: acesso direto só em desenvolvimento.
+    process.env.NODE_ENV === 'development' &&
+    new URLSearchParams(window.location.search).get('stream-calibration') === '1'
+      ? 'stream' : 'radio');
   const [audioMode,   setAudioMode]   = useState('mic');
   const [isPowered,   setIsPowered]   = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -68,6 +90,16 @@ export default function App() {
   const [trackName,   setTrackName]   = useState('');
   const [progress,    setProgress]    = useState(0);
   const [sensitivity, setSensitivity] = useState(5);
+  const [streamReady, setStreamReady] = useState(false);
+  const streamInput = useStreamInput(true);
+  const streamNetwork = useStreamNetwork(streamInput.session);
+  const recording = useStreamRecorder(streamInput.session);
+  const liveActive = ['OPENING', 'READY'].includes(streamInput.status);
+  useEffect(()=>{setPwaBusy(liveActive || Boolean(streamNetwork.role) || isPlaying || isListening || ['starting','recording','finalizing'].includes(recording.status));},[liveActive,streamNetwork.role,isPlaying,isListening,recording.status]);
+  const livePosition = useLiveProgress(liveActive);
+  const streamAnalyser = streamInput.session?.analyser || streamNetwork.analyser;
+  const streamAnalyserRef = useRef(null);
+  streamAnalyserRef.current = streamAnalyser;
   const [vuReady,     setVuReady]     = useState(false);
 
   const [needleAngle, setNeedleAngle] = useState(VU.MIN_ANGLE);
@@ -89,6 +121,54 @@ export default function App() {
   const vuPanelRef      = useRef(null);
   const prevPeakRef     = useRef(0);
   const strobeLevelRef  = useRef(0);
+
+  const streamImageRef = useRef(null);
+  const streamLoadRef = useRef(null);
+  const streamMountedRef = useRef(false);
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
+
+  // Carrega e decodifica antes de permitir qualquer conteúdo STREAM na tela.
+  const prepareStream = useCallback(() => {
+    if (!streamLoadRef.current) {
+      const image = new Image();
+      streamImageRef.current = image; // Mantém a imagem decodificada referenciada.
+      streamLoadRef.current = new Promise((resolve, reject) => {
+        image.onload = async () => {
+          try {
+            if (typeof image.decode === 'function') await image.decode();
+            resolve();
+          } catch (error) { reject(error); }
+        };
+        image.onerror = () => reject(new Error('Não foi possível carregar stream.png.'));
+        image.src = '/images/stream.png';
+      }).catch(error => {
+        streamLoadRef.current = null; // Permite nova tentativa no próximo clique.
+        throw error;
+      });
+    }
+    return streamLoadRef.current;
+  }, []);
+
+  useEffect(() => {
+    streamMountedRef.current = true;
+    let cancelled = false;
+    prepareStream().then(() => {
+      if (!cancelled) setStreamReady(true);
+    }).catch(() => {}); // Em caso de erro, o rádio permanece visível.
+    return () => { cancelled = true; streamMountedRef.current = false; };
+  }, [prepareStream]);
+
+  const openStream = () => {
+    prepareStream().then(() => {
+      if (!streamMountedRef.current || screenRef.current !== 'radio') return;
+      setStreamReady(true);
+      setScreen('stream');
+    }).catch(() => {
+      if (streamMountedRef.current && screenRef.current === 'radio')
+        alert('Não foi possível abrir STREAM. Tente novamente.');
+    });
+  };
 
   useEffect(() => {
     const l = document.createElement('link');
@@ -133,10 +213,11 @@ export default function App() {
   const startAnim = useCallback(() => {
     if (animRef.current) cancelAnimationFrame(animRef.current);
     const tick = () => {
-      if (!analyserRef.current) { animRef.current = null; return; }
+      const activeAnalyser = streamAnalyserRef.current || analyserRef.current;
+      if (!activeAnalyser) { animRef.current = null; return; }
       // ── Domínio de tempo: pico + RMS (como Winamp) ──
-      const timeBuf = new Uint8Array(analyserRef.current.fftSize);
-      analyserRef.current.getByteTimeDomainData(timeBuf);
+      const timeBuf = new Uint8Array(activeAnalyser.fftSize);
+      activeAnalyser.getByteTimeDomainData(timeBuf);
 
       let peak = 0, sumSq = 0;
       for (let i = 0; i < timeBuf.length; i++) {
@@ -202,8 +283,11 @@ export default function App() {
   }, []);
 
   const startMic = useCallback(async () => {
+    if (streamAnalyserRef.current) { startAnim(); return; }
     try {
       ensureCtx();
+      // Desconecta analyser da saída para evitar eco do microfone
+      try { analyserRef.current?.disconnect(audioCtxRef.current.destination); } catch {}
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       micStreamRef.current = stream;
       audioCtxRef.current.createMediaStreamSource(stream).connect(analyserRef.current);
@@ -266,6 +350,11 @@ export default function App() {
 
   // POWER – música NÃO para ao trocar de tela
   const handlePower = useCallback(() => {
+    if (streamAnalyserRef.current) {
+      if (isPowered) pauseAnim(); else startAnim();
+      setIsPowered(!isPowered); setScreen(isPowered ? 'radio' : 'vu');
+      return;
+    }
     if (isPowered) {
       // Voltando para o rádio
       if (audioMode === 'mic') {
@@ -290,6 +379,11 @@ export default function App() {
   }, [isPowered, audioMode, isPlaying, startMic, stopMic, startAnim, pauseAnim, handlePlay]);
 
   useEffect(() => () => { stopMic(); stopAnim(); }, [stopMic, stopAnim]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (streamAnalyser && (screen === 'vu' || screen === 'strobe')) startAnim();
+    return () => { if (streamAnalyser) pauseAnim(); };
+  }, [streamAnalyser, screen, startAnim, pauseAnim]);
 
   // ─── Layout VU ───────────────────────────────────────────────────
   const { w: PW, h: PH } = panelDims;
@@ -328,11 +422,42 @@ export default function App() {
   // ═══════════════════════════════════════════════════════════════════
   // TELA 1 – RADIO
   // ═══════════════════════════════════════════════════════════════════
-  if (screen === 'radio') {
-    const fmX = RADIO.FM_LEFT_X + progress * (RADIO.FM_RIGHT_X - RADIO.FM_LEFT_X);
-
+  if (screen === 'stream' && streamReady) {
     return (
       <div style={S.root}>
+        <div style={panelStyle(STREAM.WIDTH / STREAM.HEIGHT)}>
+          <img src="/images/stream.png" alt="STREAM" style={S.bg} draggable={false} />
+          <StreamDisplay recording={recording} network={streamNetwork} capture={streamInput} geometry={STREAM.DISPLAY} baseWidth={STREAM.WIDTH} baseHeight={STREAM.HEIGHT} />
+          {/* Hotspots definitivos. VOLTAR apenas navega; as sessões de áudio são globais. */}
+          {STREAM.BUTTONS.map(([label, centerY]) => (
+            <button key={label} type="button" aria-label={label}
+              aria-pressed={label === 'TRANSMITIR' ? ['OPENING', 'READY'].includes(streamInput.status)
+                : label === 'REC' ? recording.status === 'recording'
+                : label === 'MONITOR' ? streamInput.monitor
+                : label === 'RECEBER' ? streamNetwork.role === 'receive'
+                : label === 'PLAY / STOP' && streamNetwork.role === 'receive' ? streamNetwork.playing : undefined}
+              onClick={label === 'VOLTAR' ? () => { if ((!recording.file && recording.status !== 'finalizing') || window.confirm('A gravação permanece no aplicativo. A exportação pode estar pendente; volte ao STREAM para ouvir ou salvar WAV. Sair do display?')) setScreen('radio'); }
+                : label === 'TRANSMITIR' ? async () => { const pending = recording.stop(); if (pending) await pending; streamNetwork.stop(); streamInput.toggleCapture(); }
+                : label === 'RECEBER' ? async () => { const pending = recording.stop(); if (pending) await pending; streamInput.stop(); streamNetwork.toggleReceive(); }
+                : label === 'PLAY / STOP' ? streamNetwork.togglePlay
+                : label === 'MONITOR' ? streamInput.toggleMonitor
+                : label === 'REC' ? recording.toggle : undefined}
+              style={{ ...S.hs, background: 'transparent', border: 0, padding: 0,
+                left: `${(STREAM.BUTTON_X - STREAM.BUTTON_W / 2) / STREAM.WIDTH * 100}%`,
+                top: `${(centerY - STREAM.BUTTON_H / 2) / STREAM.HEIGHT * 100}%`,
+                width: `${STREAM.BUTTON_W / STREAM.WIDTH * 100}%`,
+                height: `${STREAM.BUTTON_H / STREAM.HEIGHT * 100}%` }} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (screen === 'radio' || (screen === 'stream' && !streamReady)) {
+    const fmX = RADIO.FM_LEFT_X + (liveActive ? livePosition : progress) * (RADIO.FM_RIGHT_X - RADIO.FM_LEFT_X);
+
+    return (
+      <div style={S.root} className="screen-fade">
         <div style={panelStyle(RADIO.ASPECT)}>
 
           <img src="/images/radio-panel.png" alt="Radio" style={S.bg} draggable={false} />
@@ -343,7 +468,7 @@ export default function App() {
             left: `${fmX}%`, top: `${RADIO.FM_NEEDLE_Y}%`,
             height: `${RADIO.FM_NEEDLE_H}%`, width: 'auto',
             transform: 'translateX(-50%)',
-            transition: 'left 0.4s linear',
+            transition: liveActive ? 'none' : 'left 0.4s linear',
             pointerEvents: 'none',
           }} />
 
@@ -411,6 +536,13 @@ export default function App() {
 
           {/* ── HOTSPOTS ──────────────────────────────────────────── */}
 
+          {/* STREAM — arte-base 3070 × 2048; centro (2330, 1795), tamanho 780 × 225. */}
+          <button type="button" aria-label="STREAM" onClick={openStream}
+            style={{ ...S.hs, background: 'transparent', border: 0, padding: 0,
+              left: `${(2330 - 780 / 2) / 3070 * 100}%`,
+              top: `${(1795 - 225 / 2) / 2048 * 100}%`,
+              width: `${780 / 3070 * 100}%`, height: `${225 / 2048 * 100}%` }} />
+
           {/* POWER */}
           <div onClick={handlePower}
                style={{ ...S.hs, left: '3%', top: '7%', width: '17%', height: '28%' }} />
@@ -424,7 +556,7 @@ export default function App() {
                style={{ ...S.hs, right: '14%', top: '24%', width: '14%', height: '18%' }} />
 
           {/* LOAD */}
-          <div onClick={() => fileInputRef.current?.click()}
+          <div onClick={() => openAudioFile(fileInputRef.current, handleFileChange)}
                style={{ ...S.hs, left: '3%', top: '43%', width: '20%', height: '26%' }} />
 
           {/* STOP */}
@@ -455,7 +587,7 @@ export default function App() {
                style={{ ...S.hs, right: '2%', top: '43%', width: '16%', height: '15%', cursor: 'ns-resize' }}
           />
 
-          <input ref={fileInputRef} type="file" accept=".mp3,.m4a,.wav,.flac,.aac"
+          <input ref={fileInputRef} type="file" accept="audio/*"
                  style={{ display: 'none' }} onChange={handleFileChange} />
         </div>
       </div>
@@ -468,7 +600,7 @@ export default function App() {
   if (screen === 'strobe') {
     const col = STROBE_COLORS[strobeColorIdx];
     return (
-      <div style={{ width: '100vw', height: '100vh', backgroundColor: '#000', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ width: '100vw', height: '100vh', backgroundColor: '#000', position: 'relative', overflow: 'hidden' }} className="screen-fade">
 
         {/* Flash colorido — opacidade = nível de áudio */}
         <div style={{

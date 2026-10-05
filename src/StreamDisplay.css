@@ -1,0 +1,93 @@
+.stream-terminal {
+  position: absolute;
+  overflow: hidden;
+  contain: paint;
+  container-type: inline-size;
+  color: var(--stream-phosphor);
+  background: transparent;
+  font-family: "Lucida Console", "Courier New", monospace;
+  text-shadow: 0 0 0.18em color-mix(in srgb, var(--stream-phosphor) 28%, transparent);
+}
+.stream-terminal::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(to bottom, transparent 0px, transparent 3px, rgba(0,0,0,0.10) 3px, rgba(0,0,0,0.10) 4px);
+}
+.stream-terminal-content {
+  box-sizing: border-box; height: 100%; padding: 4% 6%;
+  display: flex; flex-direction: column; gap: 2cqw;
+  line-height: 1.15;
+}
+.stream-terminal-header {
+  position: relative; min-height: 8cqw; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.stream-terminal-header h1 { margin: 0; font: inherit; font-size: 4.5cqw; font-weight: bold; letter-spacing: 0.03em; }
+.stream-terminal-theme {
+  position: absolute; right: -2cqw; top: -2cqw;
+  width: max(44px, 12cqw); height: max(44px, 12cqw);
+  color: inherit; background: transparent; border: 0; cursor: pointer;
+  display: grid; place-items: center;
+}
+.stream-terminal-theme span {
+  display: block; width: 4cqw; height: 4cqw;
+  border: 1px solid currentColor; border-radius: 50%;
+  background: radial-gradient(circle, currentColor 0 22%, transparent 26%);
+  box-shadow: 0 0 0.3em color-mix(in srgb, var(--stream-phosphor) 20%, transparent);
+}
+.stream-terminal-theme:focus-visible { outline: 1px dashed currentColor; outline-offset: -4px; }
+.stream-terminal-rule { height: 1px; background: currentColor; opacity: 0.35; flex-shrink: 0; }
+.stream-terminal-context { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 3cqw; }
+/* Dimensões relativas ao display aprovado: títulos ~22–25px num celular em retrato. */
+.stream-terminal-context h2 { margin: 0; max-width: 100%; font-size: 10.5cqw; line-height: 1.06; font-weight: bold; overflow-wrap: break-word; }
+.stream-terminal[data-state="idle"] h2 { font-size: 15cqw; }
+.stream-terminal-detail { margin: 0; font-size: 6.2cqw; line-height: 1.2; }
+.stream-terminal-technical { margin: 0; font-size: 4cqw; opacity: 0.75; }
+.stream-terminal-footer { flex-shrink: 0; border-top: 1px solid color-mix(in srgb, var(--stream-phosphor) 35%, transparent); padding-top: 2cqw; }
+.stream-terminal-bar-row { display: flex; align-items: center; gap: 4cqw; font-size: 4.5cqw; }
+.stream-terminal-segments { display: flex; flex: 1; gap: 1.2%; height: 4cqw; }
+.stream-terminal-segments i { flex: 1; border: 1px solid currentColor; opacity: 0.22; }
+.stream-terminal-segments i[data-lit="true"] { background: currentColor; opacity: 0.9; }
+.stream-terminal-idle-note { display: flex; align-items: center; gap: 2cqw; margin: 0; font-size: 3.5cqw; opacity: 0.7; }
+.stream-terminal-cursor { width: 1.6cqw; height: 2.7cqw; background: currentColor; animation: stream-terminal-blink 1.8s step-end infinite; }
+@keyframes stream-terminal-blink { 0%, 65% { opacity: 0.85; } 66%, 100% { opacity: 0.15; } }
+@media (prefers-reduced-motion: reduce) { .stream-terminal-cursor { animation: none; opacity: 0.85; } }
+
+/* Icons stay INSIDE the approved display; external geometry/hotspots unchanged. */
+.stream-indicators { position: absolute; right: 4%; top: 23%; bottom: 22%; width: 7%; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
+.stream-indicator { width: 100%; height: 7cqw; opacity: 0.16; }
+.stream-indicator[data-state="on"] { opacity: 1; filter: drop-shadow(0 0 1.2px currentColor); }
+.stream-indicator[data-state="pending"] { animation: stream-indicator-pulse 2s ease-in-out infinite; }
+.stream-terminal-context { padding-right: 12%; }
+.stream-recording { font-size: 4cqw; margin-top: 1cqw; }
+.stream-recording button { font: inherit; color: inherit; background: transparent; border: 1px solid currentColor; padding: 0.45em; }
+/* REC confirmation stays strictly inside the calibrated STREAM display. */
+.stream-recording-backdrop { position: absolute; inset: 0; z-index: 10; background: #000f; box-sizing: border-box; padding: 3cqw; font: 4.5cqw/1.25 monospace; overflow: auto; }
+.stream-recording-dialog { min-height: 100%; box-sizing: border-box; border: 1px solid currentColor; padding: 3cqw; }
+.stream-terminal .stream-recording-dialog h2 { font: bold 5cqw/1.2 monospace; margin: 0 0 2cqw; }
+.stream-recording-dialog p { margin: 2cqw 0; }
+.stream-recording-dialog audio { width: 100%; display: block; margin: 2cqw 0; }
+.stream-recording-dialog button { font: inherit; color: inherit; background: #000; border: 1px solid currentColor; padding: 3cqw; margin: 1cqw; min-height: 44px; }
+.stream-recording-dialog select { max-width: 100%; color: inherit; background: black; font: inherit; }
+.recording-name { overflow-wrap: anywhere; }
+
+@keyframes stream-indicator-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.75; } }
+@media (prefers-reduced-motion: reduce) { .stream-indicator[data-state="pending"] { animation: none; opacity: 0.55; } }
+
+/* Keep the contextual text and new controls legible without crowding the icon column. */
+.stream-terminal-context { gap: 2cqw; }
+.stream-terminal-context h2 { font-size: 9cqw; }
+.stream-terminal-footer { font-size: 4cqw; }
+
+/* Palette-only changes: approved green/warm and all layout coordinates remain unchanged. */
+.stream-terminal[data-theme="red"] .stream-terminal-technical,
+.stream-terminal[data-theme="cyan"] .stream-terminal-technical { color: color-mix(in srgb, var(--stream-phosphor) 85%, black); }
+.stream-indicator[data-function="REC"][data-state="on"],
+.stream-indicator[data-function="REC"][data-state="pending"] { color: #D91A00; }
+
+/* Private invitation controls remain inside the approved display. */
+.stream-session { font-size: 4cqw; }
+.stream-session button { color: inherit; font: inherit; background: black; border: 1px solid currentColor; padding: .5em; }
+.stream-session-dialog { position: absolute; inset: 0; z-index: 12; padding: 4cqw; background: black; overflow: auto; box-sizing: border-box; }
+.stream-terminal .stream-session-dialog h2 { font-size: 6cqw; }
+.stream-session-dialog textarea { width: 100%; box-sizing: border-box; color: inherit; background: black; font: inherit; min-height: 15cqw; }
+.stream-session-dialog button { min-height: 44px; margin: 1cqw; }
