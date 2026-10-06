@@ -9,6 +9,7 @@ test('finalization and automatic completion dialog, immediate playback and confi
  expect(screen.getByText('GRAVAÇÃO CONCLUÍDA')).toBeInTheDocument();
  expect(screen.getByLabelText('Ouvir gravação')).toHaveAttribute('src','blob:wav');
  fireEvent.click(screen.getByRole('button',{name:'SALVAR WAV'}));expect(exportFile).toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'VOLTAR'}));
  fireEvent.click(screen.getByRole('button',{name:'DESCARTAR'}));expect(discard).not.toHaveBeenCalled();
  fireEvent.click(screen.getByRole('button',{name:'CONFIRMAR DESCARTE'}));expect(discard).toHaveBeenCalledTimes(1);
 });

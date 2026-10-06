@@ -107,3 +107,25 @@
 .stream-session-dialog textarea { display: block; resize: none; min-height: 0; height: 10cqw; margin-top: 1cqw; font-size: 3.5cqw; }
 .stream-session-dialog select { display: block; width: 100%; background: black; color: inherit; font: inherit; padding: 1cqw; }
 .session-name { font-size: 7cqw; }.session-name small { font-size: 3.5cqw; }
+
+/* v1.0.3: one mounted main view; reserved header, body and compact controls. */
+.stream-terminal-content { gap: 2cqw; }
+.stream-terminal-header { min-height: 10cqw; }
+.stream-terminal-header h1 { max-width: 65%; }
+.stream-terminal-theme { position: static; width: 22cqw; height: 9cqw; min-width: 0; padding: 0; border: 1px solid currentColor; border-radius: 1.2cqw; font: bold 4.5cqw/1 monospace; flex-shrink: 0; }
+.stream-terminal-rule { margin-right: 27cqw; }
+.stream-terminal-footer::before { right: 27cqw; }
+.stream-terminal-context { justify-content: flex-start; padding-top: 2cqw; gap: 2cqw; }
+.stream-terminal-context h2 { font-size: 9cqw; flex-shrink: 0; }
+.stream-terminal-detail { font-size: 5.5cqw; }
+.stream-terminal-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 1.5cqw; font-size: 3.5cqw; }
+.stream-terminal-footer button { font: inherit; color: inherit; background: transparent; border: 1px solid currentColor; padding: .35em; }
+.stream-terminal-bar-row { flex-basis: 100%; }
+.stream-terminal-footer .stream-terminal-idle-note { display: none; }
+.stream-recording-backdrop { overflow: hidden; padding: 3cqw; }
+.stream-recording-dialog { height: 100%; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 1.5cqw; padding: 2cqw; font-size: 3.8cqw; }
+.stream-terminal .stream-recording-dialog h2 { font-size: 6cqw; margin: 0; }
+.stream-recording-dialog p { margin: 0; }
+.stream-recording-dialog audio { height: 9cqw; min-height: 24px; margin: 0; flex-shrink: 0; }
+.stream-recording-dialog button { min-height: 0; padding: 1.5cqw; margin: 0; font-size: 3.8cqw; }
+.recording-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5cqw; }

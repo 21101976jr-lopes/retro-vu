@@ -1,6 +1,5 @@
-import PwaUpdate from './PwaUpdate';
 import StreamSession from './StreamSession';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import useDigitalTheme from './useDigitalTheme';
 import './StreamDisplay.css';
 import StreamDiagnostic from './StreamDiagnostic';
@@ -10,7 +9,7 @@ import StreamRecording from './StreamRecording';
 
 const ISSUES = {
   'USB AUDIO NOT READY': ['ATIVE A ENTRADA', 'Toque em TRANSMITIR para iniciar a captura USB.'],
-  'USB AUDIO NOT FOUND': ['USB NÃO ENCONTRADO', 'Conecte o toca-discos e toque em TRANSMITIR.'],
+  'USB AUDIO NOT FOUND': ['USB NÃO ENCONTRADO', 'Conecte o USB e tente TRANSMITIR.'],
   'USB AUDIO DISCONNECTED': ['USB DESCONECTADO', 'Reconecte o toca-discos e toque em TRANSMITIR.'],
   'AUDIO PERMISSION REQUIRED': ['PERMITA O ÁUDIO', 'Autorize o acesso ao áudio no navegador e tente novamente.'],
   'MONITOR AUDIO ERROR': ['MONITOR INDISPONÍVEL', 'Toque em MONITOR para tentar novamente.'],
@@ -24,8 +23,13 @@ const ISSUES = {
 
 export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture, network = {}, recording = {} }) {
   const { theme, cycleTheme } = useDigitalTheme();
+  const recordingBusy = ['starting','finalizing'].includes(recording.status);
+  const [recordingOpen,setRecordingOpen] = useState(Boolean(recording.file || recordingBusy));
+  useEffect(()=>{if(recording.file || recordingBusy)setRecordingOpen(true);},[recording.file,recordingBusy]);
+  const showRecording = !network.dialog && recordingOpen && Boolean(recording.file || recordingBusy);
+  const showMain = !network.dialog && !showRecording;
   const ready = capture.status === 'READY';
-  const issue = ISSUES[capture.message] || (capture.status === 'ERROR'
+  const issue = network.role === 'receive' ? null : ISSUES[capture.message] || (capture.status === 'ERROR'
     ? ['FALHA NO ÁUDIO', 'Confira a entrada USB e tente novamente.'] : null);
   const mode = issue ? 'error' : capture.status === 'OPENING' ? 'opening'
     : capture.monitor ? 'monitor' : ready ? 'capture' : 'idle';
@@ -70,13 +74,13 @@ export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture
     style={{ left: `${geometry.x / baseWidth * 100}%`, top: `${geometry.y / baseHeight * 100}%`,
       width: `${geometry.width / baseWidth * 100}%`, height: `${geometry.height / baseHeight * 100}%`,
       '--stream-phosphor': theme.color }}>
-    <StreamIndicators capture={capture} network={network} recording={recording} />
-    <div className="stream-terminal-content">
+    {showMain && <StreamIndicators capture={capture} network={network} recording={recording} />}
+    {showMain && <div className="stream-terminal-content">
       <header className="stream-terminal-header">
         <h1>{process.env.NODE_ENV === 'development' && network.role ? <StreamDiagnostic color={theme.color} /> : 'RETRO STREAM'}</h1>
         <button type="button" className="stream-terminal-theme" onClick={cycleTheme}
           aria-label={`Alterar cor do display: ${theme.name}`} title={`Cor: ${theme.name}`}>
-          <span aria-hidden="true" /><small>COLOR</small></button>
+          COLOR</button>
       </header>
       <div className="stream-terminal-rule" />
       <div className="stream-terminal-context" aria-live="polite" aria-atomic="true">
@@ -86,7 +90,7 @@ export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture
           <span>{channel}</span><span aria-hidden="true"> · </span><span>{format}</span>
         </p>}
       </div>
-      <footer className="stream-terminal-footer">
+      {!issue && <footer className="stream-terminal-footer">
         {ready && network.role === 'send' && <StreamNightMode />}
         {receiving ? <p className="stream-terminal-detail">BUFFER {Number(network.seconds || 0).toFixed(1)} s</p> : null}
         {ready ? <div className="stream-terminal-bar-row">
@@ -97,12 +101,13 @@ export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture
         </div> : <p className="stream-terminal-idle-note">
           <span className="stream-terminal-cursor" aria-hidden="true" /> {receiving ? 'PCM · REDE' : 'CAPTURA LOCAL'}
         </p>}
-      <PwaUpdate />
       {network.share && <div className="stream-session"><button type="button" onClick={network.showShare}>SESSÃO PRIVADA</button></div>}
 
-      <StreamRecording recording={recording} color={theme.color} />
-      </footer>
-    </div>
-    <StreamSession network={network} />
+      {recording.status==='recording' && <span className="stream-rec-status">REC ATIVO</span>}
+      {recording.file && <button type="button" onClick={()=>setRecordingOpen(true)}>ÚLTIMA GRAVAÇÃO</button>}
+      </footer>}
+    </div>}
+    {network.dialog && <StreamSession network={network} />}
+    {showRecording && <StreamRecording recording={recording} color={theme.color} onClose={()=>setRecordingOpen(false)} panelOnly />}
   </section>;
 }

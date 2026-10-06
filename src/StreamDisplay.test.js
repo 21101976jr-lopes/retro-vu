@@ -62,3 +62,24 @@ test('COLOR cycles all five colors and persists the selection', () => {
   expect(localStorage.getItem('retro-vu.stream-theme')).toBe(id);
  }
 });
+
+test('USB error replaces auxiliary REC and update messages; receiving removes stale USB error',()=>{
+ const capture={...idle,status:'ERROR',message:'USB AUDIO NOT FOUND'};
+ const props={geometry:{x:234,y:280,width:1812,height:1440},baseWidth:3070,baseHeight:2048,capture,recording:{status:'error',message:'REC: ative USB'}};
+ const view=render(<StreamDisplay {...props}/>);
+ expect(screen.getByText('USB NÃO ENCONTRADO')).toBeInTheDocument();
+ expect(screen.queryByText('REC: ative USB')).not.toBeInTheDocument();
+ expect(screen.queryByText('CAPTURA LOCAL')).not.toBeInTheDocument();
+ expect(screen.queryByText('ATUALIZAÇÃO DISPONÍVEL')).not.toBeInTheDocument();
+ view.rerender(<StreamDisplay {...props} network={{role:'receive',status:'PLAYING',seconds:5}}/>);
+ expect(screen.getByText('RECEBENDO')).toBeInTheDocument();
+ expect(screen.queryByText('USB NÃO ENCONTRADO')).not.toBeInTheDocument();
+});
+test('session and recording panels unmount previous main content',()=>{
+ const props={geometry:{x:234,y:280,width:1812,height:1440},baseWidth:3070,baseHeight:2048,capture:idle};
+ const view=render(<StreamDisplay {...props}/>);
+ view.rerender(<StreamDisplay {...props} network={{dialog:'send'}}/>);
+ expect(screen.getByText('TRANSMITIR ÁUDIO?')).toBeInTheDocument();expect(screen.queryByText('PRONTO')).not.toBeInTheDocument();
+ view.rerender(<StreamDisplay {...props} recording={{status:'finalizing'}}/>);
+ expect(screen.getByText('FINALIZANDO GRAVAÇÃO')).toBeInTheDocument();expect(screen.queryByText('TRANSMITIR ÁUDIO?')).not.toBeInTheDocument();expect(screen.queryByText('PRONTO')).not.toBeInTheDocument();
+});
