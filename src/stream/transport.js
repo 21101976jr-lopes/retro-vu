@@ -20,12 +20,16 @@ export class StreamTransport {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
       // Called synchronously from RECEBER's user gesture.
       this.resume = this.ctx.resume();
+      // A suspended resume promise must not block presence/SDP indefinitely.
+      this.resume.then(() => {
+        if (this.closed) return;
+        for (const peer of this.peers.values()) if (this.ctx.state === 'running') this.readyReceiver(peer);
+      }).catch(error => { if (!this.closed) this.publish({status: 'NEEDS_PLAY', error: error.message}); });
     }
   }
   publish(values) { if (!this.closed) this.update(values); }
   async start() {
     try {
-      if (this.role === 'receive') await this.resume;
       if (this.closed) return;
       if (!window.RTCPeerConnection || !window.AudioWorkletNode) throw new Error('WebRTC / AudioWorklet indisponível');
       if (this.role === 'send') {
@@ -46,7 +50,6 @@ export class StreamTransport {
         this.capture.onprocessorerror = () => this.fail(new Error('Capture worklet failed'));
         debug('format', this.format);
       } else {
-        await this.resume;
         if (this.closed) return;
         if (this.ctx.state !== 'running') this.publish({ status: 'NEEDS_PLAY' });
       }

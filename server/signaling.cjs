@@ -25,6 +25,7 @@ function transition(state, request, now = Date.now()) {
   }
   const client = state.clients[id];
   if (client.role !== role) throw new Error('Role mismatch');
+  if (role === 'send') client.visibility = request.visibility === 'open' ? 'open' : 'private';
   client.seen = now; client.inbox = client.inbox.filter(m => m.serial > effectiveAck);
   for (const m of messages) {
     if (!m || typeof m.key !== 'string' || !['description', 'candidate', 'reset'].includes(m.type) ||
@@ -45,6 +46,8 @@ function transition(state, request, now = Date.now()) {
 }
 function createHandler({ local = false } = {}) {
   const memory = new Map();
+  const directory = new Map();
+  const prefix = () => 'retro-vu:signal:' + (process.env.STREAM_NAMESPACE || 'personal') + ':';
   async function redis(command) {
     const response = await fetch(process.env.UPSTASH_REDIS_REST_URL, {
       method: 'POST', headers: { Authorization: 'Bearer ' + process.env.UPSTASH_REDIS_REST_TOKEN,
@@ -67,23 +70,55 @@ function createHandler({ local = false } = {}) {
     try {
       const request = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
       if (!request || JSON.stringify(request).length > 60000) return res.status(413).json({ error: 'Signaling body too large' });
+      // Discovery reveals only fresh, explicitly open senders. Private rooms never register.
+      const directoryKey = prefix() + 'open';
+      if (request.action === 'discover') {
+        const now = Date.now();
+        let invites;
+        if (local) {
+          for (const [token, at] of directory) if (now - at >= TTL) directory.delete(token);
+          invites = [...directory.keys()].slice(0, 50);
+        } else {
+          await redis(['ZREMRANGEBYSCORE', directoryKey, '-inf', now - TTL]);
+          invites = await redis(['ZRANGEBYSCORE', directoryKey, now - TTL, '+inf', 'LIMIT', 0, 50]);
+        }
+        const sessions = [];
+        for (const token of invites) {
+          const key = roomKey({invite: token});
+          const raw = local ? memory.get(key)?.state : await redis(['GET', prefix() + key]);
+          const state = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          const sender = Object.values(state?.clients || {}).find(c => c.role === 'send' && c.visibility === 'open' && now - c.seen < TTL);
+          if (sender) sessions.push({invite: token, name: 'JUNIOR'});
+        }
+        return res.json({sessions});
+      }
+      async function advertise() {
+        if (request.role !== 'send') return;
+        if (local) {
+          if (!request.leave && request.visibility === 'open') directory.set(request.invite, Date.now());
+          else directory.delete(request.invite);
+        } else if (!request.leave && request.visibility === 'open') {
+          await redis(['ZADD', directoryKey, Date.now(), request.invite]);
+          await redis(['EXPIRE', directoryKey, 120]);
+        } else if (request.visibility === 'open') await redis(['ZREM', directoryKey, request.invite]);
+      }
       let room;
       try { room = roomKey(request); } catch(error) { return res.status(403).json({error:error.message}); }
       if (local) {
         const now = Date.now();
         for(const [key,value] of memory) if(now-value.at > 120000) memory.delete(key);
         const next = transition(memory.get(room)?.state, request);
-        memory.set(room,{state:next.state,at:now});return res.json(next.result);
+        memory.set(room,{state:next.state,at:now});await advertise();return res.json(next.result);
       }
       // CAS makes presence/mailboxes atomic across independent Vercel instances.
-      const key = 'retro-vu:signal:' + (process.env.STREAM_NAMESPACE || 'personal') + ':' + room;
+      const key = prefix() + room;
       for (let attempt = 0; attempt < 12; attempt++) {
         const previous = await redis(['GET', key]);
         const next = transition(previous ? JSON.parse(previous) : null, request);
         const changed = await redis(['EVAL',
           "if (redis.call('GET', KEYS[1]) or '') == ARGV[1] then redis.call('SET', KEYS[1], ARGV[2], 'EX', 120); return 1 else return 0 end",
           1, key, previous || '', JSON.stringify(next.state)]);
-        if (changed) return res.json(next.result);
+        if (changed) { await advertise(); return res.json(next.result); }
       }
       throw new Error('Signaling busy; retry');
     } catch (error) {

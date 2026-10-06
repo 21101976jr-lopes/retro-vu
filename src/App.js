@@ -439,8 +439,8 @@ export default function App() {
                 : label === 'RECEBER' ? streamNetwork.role === 'receive'
                 : label === 'PLAY / STOP' && streamNetwork.role === 'receive' ? streamNetwork.playing : undefined}
               onClick={label === 'VOLTAR' ? () => { if ((!recording.file && recording.status !== 'finalizing') || window.confirm('A gravação permanece no aplicativo. A exportação pode estar pendente; volte ao STREAM para ouvir ou salvar WAV. Sair do display?')) setScreen('radio'); }
-                : label === 'TRANSMITIR' ? async () => { const pending = recording.stop(); if (pending) await pending; streamNetwork.stop(); streamInput.toggleCapture(); }
-                : label === 'RECEBER' ? async () => { const pending = recording.stop(); if (pending) await pending; streamInput.stop(); streamNetwork.toggleReceive(); }
+                : label === 'TRANSMITIR' ? () => { const toggle = async () => { const pending = recording.stop(); if (pending) await pending; streamNetwork.stop(); streamInput.toggleCapture(); }; if (liveActive) toggle(); else streamNetwork.requestTransmit(toggle); }
+                : label === 'RECEBER' ? async () => { const pending = recording.stop(); if (pending) await pending; streamInput.stop(); if (streamNetwork.role === 'send') streamNetwork.stop(); streamNetwork.toggleReceive(); }
                 : label === 'PLAY / STOP' ? streamNetwork.togglePlay
                 : label === 'MONITOR' ? streamInput.toggleMonitor
                 : label === 'REC' ? recording.toggle : undefined}

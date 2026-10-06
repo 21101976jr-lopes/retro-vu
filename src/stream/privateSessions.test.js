@@ -66,3 +66,44 @@ test('expired Redis state resets acknowledgment generation so new offers are not
  expect(received.result.messages).toHaveLength(1);
  expect(received.result.generation).not.toBe(first.state.generation);
 });
+
+test('open discovery lists only live public senders, keeps private rooms hidden and expires stale presence',async()=>{
+ const handler=createHandler({local:true});let now=1000;const clock=jest.spyOn(Date,'now').mockImplementation(()=>now);
+ try{
+ await call(handler,request(roomA,1,'send',{visibility:'open'}));
+ await call(handler,request(roomB,2,'send'));
+ expect((await call(handler,{action:'discover'})).data.sessions).toEqual([{invite:roomA.invite,name:'JUNIOR'}]);
+ for(let n=3;n<=5;n++)await call(handler,request({invite:roomA.invite},n));
+ expect((await call(handler,request({invite:roomA.invite},6))).code).toBe(409);
+ await call(handler,request({invite:roomA.invite},7,'send',{visibility:'open'}));
+ expect((await call(handler,{action:'discover'})).data.sessions).toHaveLength(1);
+ now=32000;expect((await call(handler,{action:'discover'})).data.sessions).toEqual([]);
+ await call(handler,request(roomA,1,'send',{visibility:'open'}));
+ expect((await call(handler,{action:'discover'})).data.sessions).toHaveLength(1);
+ await call(handler,request(roomA,1,'send',{visibility:'open',leave:true}));
+ expect((await call(handler,{action:'discover'})).data.sessions).toEqual([]);
+ }finally{clock.mockRestore();}
+});
+
+test('production discovery uses Redis across instances and does not register private sessions',async()=>{
+ const before={...process.env},store=new Map(),directory=new Map();
+ process.env.STREAM_ENABLED='true';process.env.UPSTASH_REDIS_REST_URL='https://redis.example';process.env.UPSTASH_REDIS_REST_TOKEN='test-only';
+ const oldFetch=global.fetch,oldTimeout=AbortSignal.timeout;AbortSignal.timeout=()=>undefined;
+ global.fetch=jest.fn(async(url,options)=>{
+  const c=JSON.parse(options.body);let result=1;
+  if(c[0]==='GET')result=store.get(c[1])||null;
+  if(c[0]==='EVAL'){const key=c[3];if((store.get(key)||'')===c[4])store.set(key,c[5]);else result=0;}
+  if(c[0]==='ZADD')directory.set(c[3],c[2]);
+  if(c[0]==='ZRANGEBYSCORE')result=[...directory.keys()];
+  if(c[0]==='ZREM')directory.delete(c[2]);
+  return {ok:true,json:async()=>({result})};
+ });
+ try{
+  await call(createHandler(),request(roomA,1,'send',{visibility:'open'}));
+  await call(createHandler(),request(roomB,2,'send'));
+  expect((await call(createHandler(),{action:'discover'})).data.sessions).toEqual([{invite:roomA.invite,name:'JUNIOR'}]);
+  expect((await call(createHandler(),request({invite:roomA.invite},3))).data.peers).toEqual([{id:id(1),role:'send'}]);
+  await call(createHandler(),request(roomA,1,'send',{visibility:'open',leave:true}));
+  expect((await call(createHandler(),{action:'discover'})).data.sessions).toEqual([]);
+ }finally{global.fetch=oldFetch;AbortSignal.timeout=oldTimeout;process.env=before;}
+});

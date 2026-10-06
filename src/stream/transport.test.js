@@ -129,3 +129,22 @@ test('ordered resync recovers a skipped interval without closing receiver', asyn
   expect(peer.playback.port.postMessage).toHaveBeenCalledWith({ type: 'reset' });
   expect(peer.pc.close).not.toHaveBeenCalled(); expect(peer.sequence.next).toBe(501); rx.close();
 });
+
+test('pending resume does not prevent signaling, offer/answer, ICE or DataChannel setup', async () => {
+ let resumeAudio;
+ window.AudioContext.mockImplementation(()=>{const ctx=makeContext();ctx.state='suspended';ctx.resume.mockReturnValue(new Promise(resolve=>{resumeAudio=()=>{ctx.state='running';resolve();};}));return ctx;});
+ const rx=new StreamTransport('receive',null,jest.fn(),{invite:'a'.repeat(64)});
+ await rx.start();
+ expect(rx.signal.poll).toHaveBeenCalledTimes(1);
+ await rx.onSignal({peers:[{id:'sender'}],messages:[{from:'sender',type:'description',value:{type:'offer',sdp:'offer'}},{from:'sender',type:'candidate',value:{candidate:'ice'}}]});
+ const peer=rx.peers.get('sender');
+ expect(peer.pc.createAnswer).toHaveBeenCalled();
+ expect(peer.pc.addIceCandidate).toHaveBeenCalledWith({candidate:'ice'});
+ const dc=channel();rx.bindChannel(peer,dc);
+ dc.onmessage({data:JSON.stringify({type:'format',version:1,channels:1,sampleRate:48000,sampleSize:16})});await peer.chain;
+ expect(peer.awaitingReady).toBe(true);
+ expect(dc.send).not.toHaveBeenCalled();
+ resumeAudio();await Promise.resolve();await Promise.resolve();
+ expect(dc.send).toHaveBeenCalledWith(JSON.stringify({type:'ready'}));
+ rx.close();
+});

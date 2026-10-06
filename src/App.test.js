@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import App from './App';
 // Capture/visual regression suite isolates transport; integration has its own suite.
-jest.mock('./useStreamNetwork', () => () => ({ stop: jest.fn(), toggleReceive: jest.fn(), togglePlay: jest.fn() }));
+jest.mock('./useStreamNetwork', () => () => ({ requestTransmit: action => action(), stop: jest.fn(), toggleReceive: jest.fn(), togglePlay: jest.fn() }));
 
 const originalEnvironment = process.env.NODE_ENV;
 let images;

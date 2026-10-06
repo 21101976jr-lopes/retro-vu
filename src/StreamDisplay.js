@@ -98,9 +98,11 @@ export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture
           <span className="stream-terminal-cursor" aria-hidden="true" /> {receiving ? 'PCM · REDE' : 'CAPTURA LOCAL'}
         </p>}
       <PwaUpdate />
-      <StreamSession network={network} />
+      {network.share && <div className="stream-session"><button type="button" onClick={network.showShare}>SESSÃO PRIVADA</button></div>}
+
       <StreamRecording recording={recording} color={theme.color} />
       </footer>
     </div>
+    <StreamSession network={network} />
   </section>;
 }

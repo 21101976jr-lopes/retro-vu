@@ -96,3 +96,14 @@
 .stream-terminal-footer::before { content: ""; position: absolute; top: 0; left: 0; right: 12cqw; height: 1px; background: color-mix(in srgb, var(--stream-phosphor) 35%, transparent); pointer-events: none; }
 .stream-terminal-theme small { position: absolute; top: 50%; margin-top: 2.5cqw; font: 2.2cqw/1 monospace; letter-spacing: .08em; }
 
+
+/* v1.0.2: session actions occupy the full calibrated display, not a footer scroller. */
+.stream-session-dialog { display: flex; flex-direction: column; justify-content: center; gap: 2cqw; overflow: hidden; font-size: 4cqw; }
+.stream-terminal .stream-session-dialog h2 { margin: 0 0 2cqw; font-size: 6.5cqw; line-height: 1.1; }
+.stream-session-dialog p { margin: 0; }
+.stream-session-dialog button { flex-shrink: 0; margin: 0; min-height: 8cqw; padding: 2cqw; font-size: 4cqw; }
+.stream-session-dialog .session-primary { min-height: 12cqw; font-size: 6cqw; font-weight: bold; }
+.stream-session-dialog button:disabled { opacity: .3; cursor: default; }
+.stream-session-dialog textarea { display: block; resize: none; min-height: 0; height: 10cqw; margin-top: 1cqw; font-size: 3.5cqw; }
+.stream-session-dialog select { display: block; width: 100%; background: black; color: inherit; font: inherit; padding: 1cqw; }
+.session-name { font-size: 7cqw; }.session-name small { font-size: 3.5cqw; }

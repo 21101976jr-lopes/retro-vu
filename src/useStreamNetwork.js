@@ -5,11 +5,15 @@ const IDLE = { role: null, status: 'IDLE', seconds: 0, analyser: null, playing: 
 export default function useStreamNetwork(session) {
   const [state, setState] = useState(IDLE);
   const ref = useRef(null);
-  const [joinOpen,setJoinOpen]=useState(false);
+  const [dialog,setDialog]=useState(null);
+  const [sessions,setSessions]=useState([]);
+  const [discovering,setDiscovering]=useState(false);
+  const [discoveryError,setDiscoveryError]=useState('');
+  const modeRef=useRef('open'), transmitAction=useRef(null);
   const [inviteText,setInviteText]=useState(pendingInvitation);
   const [inviteError,setInviteError]=useState('');
   const [share,setShare]=useState('');
-  const stop = useCallback(() => { ref.current?.close(); ref.current = null; setState(IDLE);setShare('');setJoinOpen(false); }, []);
+  const stop = useCallback(() => { ref.current?.close(); ref.current = null; setState(IDLE);setShare('');setDialog(null); }, []);
   const start = useCallback((role, source, credentials) => {
     ref.current?.close();
     let controller;
@@ -30,21 +34,51 @@ export default function useStreamNetwork(session) {
     if (session) {
       newInvitation().then(credentials=>{
         if(cancelled)return;
-        setShare(invitationURL(credentials.invite));start('send',session,credentials);
+        const visibility=modeRef.current;
+        setShare(visibility==='private'?invitationURL(credentials.invite):'');
+        if(visibility==='private')setDialog('share');
+        start('send',session,{...credentials,visibility});
       }).catch(error=>{if(!cancelled)setState({...IDLE,status:'ERROR',role:'send',error:error.message});});
     } else if (ref.current?.role === 'send') stop();
     return ()=>{cancelled=true;};
   }, [session, start, stop]);
   useEffect(() => () => ref.current?.close(), []);
-  return { ...state, share,joinOpen,inviteText,inviteError,setInviteText,
-    cancelJoin:()=>setJoinOpen(false),
+  useEffect(() => {
+    if(dialog !== 'discover')return;
+    let cancelled=false, timer, abort;
+    async function refresh(){
+      abort=new AbortController();
+      const timeout=setTimeout(()=>abort.abort(),8000);
+      setDiscovering(true);
+      try {
+        const response=await fetch('/api/stream-signal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'discover'}),signal:abort.signal});
+        const result=await response.json();
+        if(!response.ok)throw new Error(result.error || 'Descoberta indisponível');
+        if(!cancelled){setSessions(result.sessions);setDiscoveryError('');}
+      } catch(error){if(!cancelled){setSessions([]);setDiscoveryError('Não foi possível consultar. Tentando novamente.');}}
+      finally{clearTimeout(timeout);if(!cancelled){setDiscovering(false);timer=setTimeout(refresh,3000);}}
+    }
+    refresh();return()=>{cancelled=true;clearTimeout(timer);abort?.abort();};
+  },[dialog]);
+  function connect(invite){
+    setInviteError('');setDialog(null);
+    if(window.location.hash.startsWith('#stream='))window.history.replaceState(null,'',window.location.pathname+window.location.search);
+    // Keep AudioContext creation/resume in this direct CONNECT user gesture.
+    start('receive',null,{invite});
+  }
+  return { ...state, share,dialog,sessions,discovering,discoveryError,inviteText,inviteError,setInviteText,
+    closeDialog:()=>setDialog(null),showShare:()=>setDialog('share'),
+    privateJoin:()=>{setInviteError('');setDialog('private');},
+    showDiscovery:()=>setDialog('discover'),
+    requestTransmit:action=>{transmitAction.current=action;setDialog('send');},
+    confirmTransmit:mode=>{modeRef.current=mode;setDialog(null);transmitAction.current?.();},
+    connect,
     join:()=>{
       const invite=parseInvitation(inviteText);
-      if(!invite){setInviteError('Cole o convite privado recebido do transmissor.');return;}
-      setInviteError('');setJoinOpen(false);
-      if(window.location.hash.startsWith('#stream='))window.history.replaceState(null,'',window.location.pathname+window.location.search);
-      start('receive',null,{invite});
+      if(!invite){setInviteError('Cole um convite válido deste Retro VU.');return;}
+      connect(invite);
     }, stop, toggleReceive: () => {
-    if (ref.current?.role === 'receive') stop(); else {setJoinOpen(true);setInviteError('');}
-  }, togglePlay: () => ref.current?.togglePlay() };
+      if (ref.current?.role === 'receive') stop();
+      else {setDialog('discover');setInviteError('');}
+    }, togglePlay: () => ref.current?.togglePlay() };
 }

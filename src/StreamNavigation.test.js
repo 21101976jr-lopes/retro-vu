@@ -18,8 +18,9 @@ test('RECEBER survives VOLTAR, keeps its session on re-entry, STOP delegates, ex
   fireEvent.click(screen.getByRole('button', { name: 'STREAM', exact: true }));
   await act(async () => images.find(image => image.src === '/images/stream.png').onload());
   fireEvent.click(screen.getByRole('button', { name: 'RECEBER', exact: true }));
+  fireEvent.click(screen.getByRole('button',{name:'ENTRAR EM MODO PRIVADO'}));
   fireEvent.change(screen.getByLabelText('Convite'),{target:{value:'a'.repeat(64)}});
-  fireEvent.click(screen.getByRole('button',{name:'ENTRAR NA SESSÃO'}));
+  fireEvent.click(screen.getByRole('button',{name:'CONECTAR'}));
   expect(screen.getByText('RECEBENDO')).toBeInTheDocument();
   const active = controller;
   fireEvent.click(screen.getByRole('button', { name: 'VOLTAR', exact: true }));
