@@ -1,0 +1,23 @@
+import {act,fireEvent,render,screen} from '@testing-library/react';
+import App from './App';
+let mockActiveSession;
+jest.mock('./useStreamNetwork',()=>session=>{mockActiveSession=session;return {requestTransmit:action=>action('player'),stop:jest.fn(),toggleReceive:jest.fn(),togglePlay:jest.fn()};});
+let images,audio,ctx,bus;
+beforeEach(()=>{
+ images=[];jest.spyOn(window,'Image').mockImplementation(()=>{const i={decode:jest.fn().mockResolvedValue()};images.push(i);return i;});
+ bus={connect:jest.fn(),disconnect:jest.fn()};ctx={state:'running',sampleRate:48000,destination:{},resume:jest.fn().mockResolvedValue(),close:jest.fn().mockResolvedValue(),createAnalyser:()=>({fftSize:2048}),createGain:()=>bus,createMediaElementSource:jest.fn(()=>({connect:jest.fn()}))};window.AudioContext=jest.fn(()=>ctx);
+ jest.spyOn(window,'Audio').mockImplementation(()=>{audio=new EventTarget();audio.paused=true;audio.play=jest.fn(async()=>{audio.paused=false;});audio.pause=jest.fn(()=>{audio.paused=true;});return audio;});
+ URL.createObjectURL=jest.fn(f=>'blob:'+f.name);URL.revokeObjectURL=jest.fn();jest.spyOn(window,'requestAnimationFrame').mockReturnValue(1);jest.spyOn(window,'cancelAnimationFrame').mockImplementation(()=>{});
+});
+afterEach(()=>{jest.restoreAllMocks();delete window.AudioContext;});
+test('multi-file player retains source and transmission through next track and navigation',async()=>{
+ const view=render(<App/>);const files=[new File(['a'],'first.wav',{type:'audio/wav'}),new File(['b'],'second.webm',{type:'audio/webm'})];
+ fireEvent.change(screen.getByLabelText('Arquivos de áudio'),{target:{files}});
+ expect(screen.getByLabelText('Arquivos de áudio')).toHaveAttribute('multiple');
+ fireEvent.click(screen.getByRole('button',{name:'STREAM',exact:true}));await act(async()=>images.find(i=>i.src==='/images/stream.png').onload());
+ fireEvent.click(screen.getByRole('button',{name:'TRANSMITIR',exact:true}));await act(async()=>{await Promise.resolve();});
+ const session=mockActiveSession;expect(session.kind).toBe('player');expect(audio.src).toBe('blob:first.wav');
+ await act(async()=>audio.dispatchEvent(new Event('ended')));
+ expect(audio.src).toBe('blob:second.webm');expect(mockActiveSession).toBe(session);expect(ctx.createMediaElementSource).toHaveBeenCalledTimes(1);
+ fireEvent.click(screen.getByRole('button',{name:'VOLTAR',exact:true}));expect(mockActiveSession).toBe(session);expect(ctx.close).not.toHaveBeenCalled();expect(screen.getByText('second')).toBeInTheDocument();view.unmount();expect(ctx.close).toHaveBeenCalled();
+});

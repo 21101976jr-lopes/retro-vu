@@ -148,3 +148,24 @@ test('pending resume does not prevent signaling, offer/answer, ICE or DataChanne
  expect(dc.send).toHaveBeenCalledWith(JSON.stringify({type:'ready'}));
  rx.close();
 });
+
+test('voice sends an existing media track without a PCM capture or 5 second buffer',async()=>{
+ const track={enabled:true},stream={getAudioTracks:()=>[track]},ctx=makeContext();
+ const create=window.RTCPeerConnection.getMockImplementation();window.RTCPeerConnection.mockImplementation(()=>{const pc=create();pc.addTrack=jest.fn();return pc;});
+ const tx=new StreamTransport('send',{kind:'voice',stream,ctx,settings:{channelCount:1}},jest.fn());await tx.start();await tx.onSignal({peers:[{id:'rx'}],messages:[]});
+ const peer=tx.peers.get('rx');expect(peer.pc.addTrack).toHaveBeenCalledWith(track,stream);expect(ctx.audioWorklet.addModule).not.toHaveBeenCalled();expect(nodes).toHaveLength(0);peer.channel.onopen();peer.channel.onmessage({data:JSON.stringify({type:'ready'})});expect(peer.queue).toBeUndefined();expect(tx.capture).toBeUndefined();tx.close();expect(ctx.close).not.toHaveBeenCalled();
+});
+test('voice receiver uses media source, immediate output gate and a digital REC branch',async()=>{
+ const update=jest.fn(),rx=new StreamTransport('receive',null,update);await rx.start();
+ const source={connect:jest.fn(),disconnect:jest.fn()},gain={connect:jest.fn(),disconnect:jest.fn(),gain:{value:1,setValueAtTime:jest.fn()}};
+ rx.ctx.createMediaStreamSource=jest.fn(()=>source);rx.ctx.createGain=()=>gain;
+ const peer=rx.makePeer('tx'),track={kind:'audio',muted:false,getSettings:()=>({channelCount:1})},stream={getAudioTracks:()=>[track]};
+ peer.pc.ontrack({track,streams:[stream]});await Promise.resolve();
+ expect(rx.recordingSession.source).toBe(source);expect(gain.connect).toHaveBeenCalledWith(rx.ctx.destination);expect(nodes).toHaveLength(0);
+ expect(update).toHaveBeenCalledWith(expect.objectContaining({status:'PLAYING',sourceKind:'voice',seconds:0}));
+ await rx.togglePlay();expect(gain.gain.setValueAtTime).toHaveBeenCalledWith(0,undefined);expect(rx.ctx.close).not.toHaveBeenCalled();rx.close();expect(source.disconnect).toHaveBeenCalled();
+});
+test('receiver teardown waits for WAV finalization before closing context',async()=>{
+ const rx=new StreamTransport('receive',null,jest.fn());await rx.start();const peer=rx.makePeer('tx');await rx.preparePlayback({channels:1,sampleRate:48000,sampleSize:16},peer);
+ let done;rx.recordingSession.onEnd.add(()=>new Promise(resolve=>done=resolve));rx.close();expect(rx.ctx.close).not.toHaveBeenCalled();done();await Promise.resolve();await Promise.resolve();await Promise.resolve();expect(rx.ctx.close).toHaveBeenCalled();
+});

@@ -12,3 +12,5 @@ test('unsupported API uses existing audio input; cancellation does not open anot
  window.showOpenFilePicker=jest.fn().mockRejectedValue(new DOMException('cancel','AbortError'));
  await openAudioFile(input,jest.fn());expect(input.click).toHaveBeenCalledTimes(1);
 });
+
+test('multi-file selection preserves ordered local files',async()=>{const files=[new File(['a'],'a.wav'),new File(['b'],'b.webm')],change=jest.fn();window.showOpenFilePicker=jest.fn().mockResolvedValue(files.map(file=>({getFile:async()=>file})));await openAudioFile(null,change);expect(window.showOpenFilePicker).toHaveBeenCalledWith(expect.objectContaining({multiple:true}));expect(change.mock.calls[0][0].target.files).toEqual(files);});

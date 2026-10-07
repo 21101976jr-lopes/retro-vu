@@ -129,3 +129,12 @@
 .stream-recording-dialog audio { height: 9cqw; min-height: 24px; margin: 0; flex-shrink: 0; }
 .stream-recording-dialog button { min-height: 0; padding: 1.5cqw; margin: 0; font-size: 3.8cqw; }
 .recording-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5cqw; }
+
+.stream-voice-toggle{background:transparent;color:inherit;border:1px solid currentColor;padding:2cqw;font:inherit;font-size:5cqw;min-height:10cqw;}
+
+.stream-terminal-footer .stream-voice-toggle{flex-basis:100%;font-size:5cqw;min-height:14cqw;}
+
+.playlist-panel div{display:flex;gap:2cqw;width:100%;}.playlist-panel div button{flex:1;min-width:0;padding:1.5cqw;font-size:3.7cqw;}
+.playlist-panel p{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:100%;font-size:4cqw;}
+
+.source-panel button{font-size:5cqw;min-height:11cqw;}.playlist-panel div button{font-size:4.5cqw;min-height:10cqw;}

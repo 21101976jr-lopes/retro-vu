@@ -33,3 +33,5 @@ test('share uses native sharing and clipboard fallback',async()=>{
  fireEvent.click(screen.getByText('COPIAR CONVITE'));await waitFor(()=>expect(navigator.clipboard.writeText).toHaveBeenCalled());
  delete navigator.share;delete navigator.clipboard;
 });
+
+test('source choice replaces content before open/private choice',()=>{const chooseSource=jest.fn();render(<StreamSession network={{dialog:'source',chooseSource}}/>);for(const [label,kind] of [['USB / VINIL','usb'],['PLAYER','player'],['MICROFONE','voice']]){fireEvent.click(screen.getByText(label));expect(chooseSource).toHaveBeenLastCalledWith(kind);}expect(screen.queryByText('MODO PRIVADO')).not.toBeInTheDocument();});

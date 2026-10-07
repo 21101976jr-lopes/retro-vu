@@ -44,3 +44,9 @@ test('storage unsupported or insufficient space cannot silently fall back to unb
  const update=jest.fn();Object.defineProperty(navigator,'storage',{configurable:true,value:{}});
  const r=new WavRecorder(session,update);await expect(r.start()).rejects.toThrow(/OPFS/);r.dispose();
 });
+
+test('receiver PCM node records without a MediaStream and finalizes on session disconnect',async()=>{
+ delete session.stream;session.onEnd=new Set();const update=jest.fn(),r=new WavRecorder(session,update);await r.start();expect(session.onEnd.size).toBe(1);expect(session.source.connect).toHaveBeenCalledWith(node);
+ const done=[...session.onEnd][0]();await Promise.resolve();expect(node.port.postMessage).toHaveBeenCalledWith({type:'stop'});node.port.onmessage({data:{type:'stopped'}});worker.onmessage({data:{type:'file',file:new Blob(['wav'])}});await done;
+ expect(update).toHaveBeenLastCalledWith(expect.objectContaining({status:'available',message:expect.stringContaining('Fonte encerrada')}));expect(session.onEnd.size).toBe(0);
+});

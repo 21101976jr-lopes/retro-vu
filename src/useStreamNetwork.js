@@ -6,6 +6,7 @@ export default function useStreamNetwork(session) {
   const [state, setState] = useState(IDLE);
   const ref = useRef(null);
   const [dialog,setDialog]=useState(null);
+  const sourceRef=useRef('usb');
   const [sessions,setSessions]=useState([]);
   const [discovering,setDiscovering]=useState(false);
   const [discoveryError,setDiscoveryError]=useState('');
@@ -70,8 +71,9 @@ export default function useStreamNetwork(session) {
     closeDialog:()=>setDialog(null),showShare:()=>setDialog('share'),
     privateJoin:()=>{setInviteError('');setDialog('private');},
     showDiscovery:()=>setDialog('discover'),
-    requestTransmit:action=>{transmitAction.current=action;setDialog('send');},
-    confirmTransmit:mode=>{modeRef.current=mode;setDialog(null);transmitAction.current?.();},
+    requestTransmit:action=>{transmitAction.current=action;setDialog('source');},
+    chooseSource:kind=>{sourceRef.current=kind;setDialog('send');},
+    confirmTransmit:mode=>{modeRef.current=mode;setDialog(null);transmitAction.current?.(sourceRef.current);},
     connect,
     join:()=>{
       const invite=parseInvitation(inviteText);

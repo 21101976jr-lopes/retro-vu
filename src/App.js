@@ -1,6 +1,9 @@
 import useDigitalTheme from './useDigitalTheme';
 import {setPwaBusy} from './pwa';
-import { openAudioFile } from './recording/filePicker';
+import useVoiceInput from './useVoiceInput';
+import { nextTrack } from './playlist';
+import { radioLights } from './radioLights';
+import { openAudioFile, openAudioFolder } from './recording/filePicker';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import StreamDisplay from './StreamDisplay';
 import useStreamInput from './useStreamInput';
@@ -94,12 +97,26 @@ export default function App() {
   const [sensitivity, setSensitivity] = useState(5);
   const [streamReady, setStreamReady] = useState(false);
   const streamInput = useStreamInput(true);
-  const streamNetwork = useStreamNetwork(streamInput.session);
-  const recording = useStreamRecorder(streamInput.session);
-  const liveActive = ['OPENING', 'READY'].includes(streamInput.status);
+  const voice = useVoiceInput();
+  const [sourceKind,setSourceKind]=useState('usb');
+  const [playerSession,setPlayerSession]=useState(null);
+  const [playerSending,setPlayerSending]=useState(false);
+  const [playerMonitor,setPlayerMonitor]=useState(false);
+  const activeSession=sourceKind==='voice'?voice.session:sourceKind==='player'?(playerSending?playerSession:null):streamInput.session;
+  const capture=sourceKind==='voice'?{...voice,kind:'voice'}:sourceKind==='player'?{
+    status:playerSending?'READY':'STANDBY',settings:playerSession?.settings||{},signal:0,session:activeSession,kind:'player',monitor:playerMonitor
+  }:{...streamInput,kind:'usb'};
+  const streamNetwork = useStreamNetwork(activeSession);
+  const recording = useStreamRecorder(activeSession || streamNetwork.recordingSession);
+  const liveActive = ['OPENING', 'READY'].includes(capture.status);
+  const [playlistOpen,setPlaylistOpen]=useState(false);
+  const [queue,setQueue]=useState([]),[queueIndex,setQueueIndex]=useState(0);
+  const [repeat,setRepeat]=useState(false),[shuffle,setShuffle]=useState(false);
+  const playlistRef=useRef({files:[],index:0,repeat:false,shuffle:false});
+  playlistRef.current.repeat=repeat;playlistRef.current.shuffle=shuffle;
   useEffect(()=>{setPwaBusy(liveActive || Boolean(streamNetwork.role) || isPlaying || isListening || ['starting','recording','finalizing'].includes(recording.status));},[liveActive,streamNetwork.role,isPlaying,isListening,recording.status]);
   const livePosition = useLiveProgress(liveActive);
-  const streamAnalyser = streamInput.session?.analyser || streamNetwork.analyser;
+  const streamAnalyser = activeSession?.analyser || streamNetwork.analyser;
   const streamAnalyserRef = useRef(null);
   streamAnalyserRef.current = streamAnalyser;
   const [vuReady,     setVuReady]     = useState(false);
@@ -303,52 +320,74 @@ export default function App() {
     setIsListening(false); stopAnim();
   }, [stopAnim]);
 
-  const handleFileChange = useCallback((e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setTrackName(file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ').trim());
-    if (audioElRef.current) {
-      audioElRef.current.pause();
-      try { URL.revokeObjectURL(audioElRef.current.src); } catch {}
-    }
-    const audio = new Audio(URL.createObjectURL(file));
-    audio.addEventListener('timeupdate', () => {
-      if (audio.duration > 0) setProgress(audio.currentTime / audio.duration);
-    });
-    audio.addEventListener('ended', () => {
-      setIsPlaying(false); setProgress(0); stopAnim(); setIsListening(false);
-    });
-    audioElRef.current = audio;
-    audioElSrcRef.current = null;
-    setIsPlaying(false); setProgress(0);
-    setAudioMode('player');
-    e.target.value = '';
-  }, [stopAnim]);
-
+  const playbackRef=useRef(null);
   const handlePlay = useCallback(() => {
     if (!audioElRef.current) { alert('Carregue uma música primeiro (LOAD / ABRIR).'); return; }
     ensureCtx();
     if (!audioElSrcRef.current) {
-      const src = audioCtxRef.current.createMediaElementSource(audioElRef.current);
-      src.connect(analyserRef.current);
-      analyserRef.current.connect(audioCtxRef.current.destination);
-      audioElSrcRef.current = src;
+      const src=audioCtxRef.current.createMediaElementSource(audioElRef.current);
+      // A stable stereo Web Audio bus survives every local file change.
+      const bus=audioCtxRef.current.createGain();bus.channelCount=2;bus.channelCountMode='explicit';
+      src.connect(bus);bus.connect(analyserRef.current);bus.connect(audioCtxRef.current.destination);
+      audioElSrcRef.current=bus;
+      setPlayerSession({ready:true,kind:'player',ctx:audioCtxRef.current,source:bus,analyser:analyserRef.current,
+        settings:{sampleRate:audioCtxRef.current.sampleRate,channelCount:2,sampleSize:16}});
     }
-    audioElRef.current.play().catch(err => alert('Erro: ' + err.message));
-    setIsPlaying(true); setIsListening(true);
-    setAudioMode('player'); // ← garante modo PLAYER ao dar play
-    startAnim();
-  }, [ensureCtx, startAnim]);
-
-  const handlePause = useCallback(() => {
-    audioElRef.current?.pause();
-    setIsPlaying(false); stopAnim(); setIsListening(false);
-  }, [stopAnim]);
-
-  const handleStop = useCallback(() => {
-    if (audioElRef.current) { audioElRef.current.pause(); audioElRef.current.currentTime = 0; }
-    setIsPlaying(false); setProgress(0); stopAnim(); setIsListening(false);
-  }, [stopAnim]);
+    audioElRef.current.play().then(()=>{setIsPlaying(true);setIsListening(true);startAnim();}).catch(err=>{setIsPlaying(false);setIsListening(false);alert('Erro: '+err.message);});
+    setAudioMode('player');
+  }, [ensureCtx,startAnim]);
+  playbackRef.current=handlePlay;
+  const loadTrack=useCallback((index,play=false)=>{
+    const list=playlistRef.current,file=list.files[index];if(!file)return;
+    list.index=index;setQueueIndex(index);
+    let audio=audioElRef.current;
+    if(!audio){
+      audio=new Audio();audioElRef.current=audio;
+      audio.addEventListener('timeupdate',()=>{if(audio.duration>0)setProgress(audio.currentTime/audio.duration);});
+      audio.addEventListener('ended',()=>{
+        const q=playlistRef.current,index=nextTrack(q.index,q.files.length,{repeat:q.repeat,shuffle:q.shuffle});
+        if(index!==null)q.load(index,true);
+        else{setIsPlaying(false);setIsListening(false);setProgress(0);stopAnim();}
+      });
+      audio.addEventListener('error',()=>{setIsPlaying(false);setIsListening(false);});
+    }
+    audio.pause();if(audio.src)URL.revokeObjectURL(audio.src);
+    audio.src=URL.createObjectURL(file);
+    setTrackName(file.name.replace(/\.[^/.]+$/,'').replace(/[_-]/g,' ').trim());
+    setProgress(0);setIsPlaying(false);setIsListening(false);setAudioMode('player');
+    if(play)playbackRef.current();
+  },[stopAnim]);
+  playlistRef.current.load=loadTrack;
+  const handleFileChange=useCallback(e=>{
+    const files=Array.from(e.target.files||[]).filter(f=>f.type.startsWith('audio/')||/\.(mp3|m4a|wav|flac|aac|webm)$/i.test(f.name));
+    if(!files.length)return;
+    playlistRef.current.files=files;setQueue(files);loadTrack(0,Boolean(audioElRef.current&&!audioElRef.current.paused));e.target.value='';
+  },[loadTrack]);
+  const handlePause=useCallback(()=>{audioElRef.current?.pause();setIsPlaying(false);setIsListening(false);stopAnim();},[stopAnim]);
+  const handleStop=useCallback(()=>{audioElRef.current?.pause();if(audioElRef.current)audioElRef.current.currentTime=0;setIsPlaying(false);setIsListening(false);setProgress(0);stopAnim();},[stopAnim]);
+  useEffect(()=>()=>{audioElRef.current?.pause();if(audioElRef.current?.src)URL.revokeObjectURL(audioElRef.current.src);audioCtxRef.current?.close().catch(()=>{});},[]);
+  function stepTrack(direction){const q=playlistRef.current;const index=nextTrack(q.index,q.files.length,{direction,repeat:true,shuffle:q.shuffle});if(index!==null)loadTrack(index,isPlaying);}
+  async function stopSource(){const pending=recording.stop();if(pending)await pending;streamNetwork.stop();streamInput.stop();voice.stop();if(playerSending&&!playerMonitor)audioElSrcRef.current?.connect(audioCtxRef.current.destination);setPlayerSending(false);setPlayerMonitor(false);}
+  function beginTransmit(kind='usb'){
+    setSourceKind(kind);
+    if(kind==='usb'){handlePause();streamInput.toggleCapture();}
+    else if(kind==='voice'){handlePause();stopMic();voice.start();}
+    else if(!audioElRef.current){setPlaylistOpen(true);}
+    else{handlePlay();setPlayerMonitor(true);setPlayerSending(true);}
+  }
+  function toggleMonitor(){
+    if(sourceKind==='usb')streamInput.toggleMonitor();
+    else if(sourceKind==='voice')voice.toggleMonitor();
+    else if(playerSending&&audioElSrcRef.current){
+      if(playerMonitor)audioElSrcRef.current.disconnect(audioCtxRef.current.destination);
+      else audioElSrcRef.current.connect(audioCtxRef.current.destination);
+      setPlayerMonitor(!playerMonitor);
+    }
+  }
+  const lights=radioLights({kind:activeSession?sourceKind:streamNetwork.role==='receive'?streamNetwork.sourceKind:null,
+    muted:streamNetwork.role==='receive'?streamNetwork.voiceMuted:voice.muted,localPlaying:isPlaying,legacyMic:audioMode==='mic'&&isListening&&!isPlaying,
+    receiving:streamNetwork.role==='receive'&&streamNetwork.status==='PLAYING'&&streamNetwork.playing&&!streamNetwork.voiceMuted,
+    monitor:Boolean(capture.monitor),playerSending});
 
   // POWER – música NÃO para ao trocar de tela
   const handlePower = useCallback(() => {
@@ -429,20 +468,24 @@ export default function App() {
       <div style={S.root}>
         <div style={panelStyle(STREAM.WIDTH / STREAM.HEIGHT)}>
           <img src="/images/stream.png" alt="STREAM" style={S.bg} draggable={false} />
-          <StreamDisplay recording={recording} network={streamNetwork} capture={streamInput} geometry={STREAM.DISPLAY} baseWidth={STREAM.WIDTH} baseHeight={STREAM.HEIGHT} />
+          <input aria-label="Arquivos de áudio" ref={fileInputRef} type="file" accept="audio/*" multiple style={{display:'none'}} onChange={handleFileChange} />
+          <StreamDisplay playlist={playlistOpen?{name:trackName,index:queueIndex,length:queue.length,repeat,shuffle,playing:isPlaying,
+            files:()=>openAudioFile(fileInputRef.current,handleFileChange),folder:()=>openAudioFolder(fileInputRef.current,handleFileChange),
+            previous:()=>stepTrack(-1),next:()=>stepTrack(1),toggleRepeat:()=>setRepeat(!repeat),toggleShuffle:()=>setShuffle(!shuffle),
+            play:isPlaying?handlePause:handlePlay,close:()=>setPlaylistOpen(false)}:null} recording={recording} network={streamNetwork} capture={capture} geometry={STREAM.DISPLAY} baseWidth={STREAM.WIDTH} baseHeight={STREAM.HEIGHT} />
           {/* Hotspots definitivos. VOLTAR apenas navega; as sessões de áudio são globais. */}
           {STREAM.BUTTONS.map(([label, centerY]) => (
             <button key={label} type="button" aria-label={label}
-              aria-pressed={label === 'TRANSMITIR' ? ['OPENING', 'READY'].includes(streamInput.status)
+              aria-pressed={label === 'TRANSMITIR' ? liveActive
                 : label === 'REC' ? recording.status === 'recording'
-                : label === 'MONITOR' ? streamInput.monitor
+                : label === 'MONITOR' ? capture.monitor
                 : label === 'RECEBER' ? streamNetwork.role === 'receive'
                 : label === 'PLAY / STOP' && streamNetwork.role === 'receive' ? streamNetwork.playing : undefined}
               onClick={label === 'VOLTAR' ? () => { if ((!recording.file && recording.status !== 'finalizing') || window.confirm('A gravação permanece no aplicativo. A exportação pode estar pendente; volte ao STREAM para ouvir ou salvar WAV. Sair do display?')) setScreen('radio'); }
-                : label === 'TRANSMITIR' ? () => { const toggle = async () => { const pending = recording.stop(); if (pending) await pending; streamNetwork.stop(); streamInput.toggleCapture(); }; if (liveActive) toggle(); else streamNetwork.requestTransmit(toggle); }
-                : label === 'RECEBER' ? async () => { const pending = recording.stop(); if (pending) await pending; streamInput.stop(); if (streamNetwork.role === 'send') streamNetwork.stop(); streamNetwork.toggleReceive(); }
+                : label === 'TRANSMITIR' ? () => { if(liveActive)stopSource();else streamNetwork.requestTransmit(beginTransmit); }
+                : label === 'RECEBER' ? async () => { const pending = recording.stop(); if (pending) await pending; streamInput.stop();voice.stop();handlePause();if(playerSending&&!playerMonitor)audioElSrcRef.current?.connect(audioCtxRef.current.destination);setPlayerSending(false);setPlayerMonitor(false); if (streamNetwork.role === 'send') streamNetwork.stop(); streamNetwork.toggleReceive(); }
                 : label === 'PLAY / STOP' ? streamNetwork.togglePlay
-                : label === 'MONITOR' ? streamInput.toggleMonitor
+                : label === 'MONITOR' ? toggleMonitor
                 : label === 'REC' ? recording.toggle : undefined}
               style={{ ...S.hs, background: 'transparent', border: 0, padding: 0,
                 left: `${(STREAM.BUTTON_X - STREAM.BUTTON_W / 2) / STREAM.WIDTH * 100}%`,
@@ -476,9 +519,9 @@ export default function App() {
 
           {/* LEDs — POWER sempre aceso */}
           <Led xPct={RADIO.LED_POWER_X}  yPct={RADIO.LED_POWER_Y}  wPct={RADIO.LED_SMALL_W} on={true} />
-          <Led xPct={RADIO.LED_MIC_X}    yPct={RADIO.LED_MIC_Y}    wPct={RADIO.LED_SMALL_W} on={audioMode === 'mic'} />
-          <Led xPct={RADIO.LED_PLAYER_X} yPct={RADIO.LED_PLAYER_Y} wPct={RADIO.LED_SMALL_W} on={audioMode === 'player'} />
-          <Led xPct={RADIO.LED_STATUS_X} yPct={RADIO.LED_STATUS_Y} wPct={RADIO.LED_LARGE_W} on={isListening} />
+          <Led xPct={RADIO.LED_MIC_X}    yPct={RADIO.LED_MIC_Y}    wPct={RADIO.LED_SMALL_W} on={lights.mic} />
+          <Led xPct={RADIO.LED_PLAYER_X} yPct={RADIO.LED_PLAYER_Y} wPct={RADIO.LED_SMALL_W} on={lights.player} />
+          <Led xPct={RADIO.LED_STATUS_X} yPct={RADIO.LED_STATUS_Y} wPct={RADIO.LED_LARGE_W} on={lights.listening} />
 
           {/* Display NOW PLAYING */}
           <div style={{
@@ -496,7 +539,7 @@ export default function App() {
                   color: digitalTheme.color, fontFamily: "'Oswald',sans-serif",
                   fontWeight: 400, fontSize: 'clamp(6px,.8vw,10px)',
                   opacity: 0.55, letterSpacing: 3, lineHeight: 1,
-                }}>NOW PLAYING</span>
+                }}>NOW PLAYING {queue.length>1? queueIndex+1+'/'+queue.length : ''}</span>
                 <span style={{
                   color: digitalTheme.color, fontFamily: "'Oswald',sans-serif",
                   fontWeight: 700, fontSize: 'clamp(10px,1.4vw,18px)',
@@ -589,7 +632,8 @@ export default function App() {
                style={{ ...S.hs, right: '2%', top: '43%', width: '16%', height: '15%', cursor: 'ns-resize' }}
           />
 
-          <input ref={fileInputRef} type="file" accept="audio/*"
+          <button aria-label="Playlist" onClick={()=>{setPlaylistOpen(true);openStream();}} style={{position:'absolute',left:'33%',top:'43%',width:'34%',height:'6%',background:'#080a08',color:digitalTheme.color,border:'1px solid currentColor',fontFamily:'monospace',fontSize:'clamp(10px,1.4vw,18px)'}}>PLAYLIST {queue.length?queueIndex+1+'/'+queue.length:''}</button>
+          <input aria-label="Arquivos de áudio" ref={fileInputRef} type="file" accept="audio/*" multiple
                  style={{ display: 'none' }} onChange={handleFileChange} />
         </div>
       </div>

@@ -30,8 +30,8 @@ export default function useStreamRecorder(session) {
   function toggle() {
     const o = owner.current;
     if (o.current) { stop(); return; }
-    if (!session?.ready || session.stream.getAudioTracks()[0]?.readyState !== 'live') {
-      setState(s=>({...s,status:'error',message:'REC: ative a entrada USB com TRANSMITIR.'})); return;
+    if (!session?.ready || (session.stream && session.stream.getAudioTracks()[0]?.readyState !== 'live')) {
+      setState(s=>({...s,status:'error',message:'REC: ative uma fonte ou conecte RECEBER.'})); return;
     }
     o.revision++;
     navigator.storage?.persist?.().catch(()=>{});

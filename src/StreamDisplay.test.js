@@ -8,7 +8,7 @@ beforeEach(() => localStorage.clear());
 test('initial display prioritizes PRONTO and omits laboratory controls', () => {
   render(display());
   expect(screen.getByRole('heading', { name: 'PRONTO' })).toBeInTheDocument();
-  expect(screen.getByText('Toque em TRANSMITIR para iniciar a entrada USB.')).toBeInTheDocument();
+  expect(screen.getByText('Toque em TRANSMITIR para escolher a fonte.')).toBeInTheDocument();
   expect(screen.getAllByRole('button')).toHaveLength(1);
   expect(screen.queryByText(/COPIAR DIAGNÓSTICO|BUFFER|NETWORK/)).not.toBeInTheDocument();
 });

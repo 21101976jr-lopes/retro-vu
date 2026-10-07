@@ -15,7 +15,14 @@ export default function StreamSession({network}) {
   }else await copy();
  }
  return <div className="stream-session">
-  {network.dialog && <section role="dialog" aria-modal="true" aria-label={network.dialog==='send'?'Transmitir áudio':network.dialog==='discover'?'Receber áudio':'Sessão privada'} className="stream-session-dialog">
+  {network.dialog && <section role="dialog" aria-modal="true" aria-label={network.dialog==='source'?'Fonte de áudio':network.dialog==='send'?'Transmitir áudio':network.dialog==='discover'?'Receber áudio':'Sessão privada'} className={`stream-session-dialog ${network.dialog==='source'?'source-panel':''}`}>
+   {network.dialog==='source' && <>
+    <h2>FONTE DE ÁUDIO</h2>
+    <button className="session-primary" onClick={()=>network.chooseSource('usb')}>USB / VINIL</button>
+    <button onClick={()=>network.chooseSource('player')}>PLAYER</button>
+    <button onClick={()=>network.chooseSource('voice')}>MICROFONE</button>
+    <button onClick={network.closeDialog}>VOLTAR</button>
+   </>}
    {network.dialog==='send' && <>
     <h2>TRANSMITIR ÁUDIO?</h2>
     <button className="session-primary" type="button" onClick={()=>network.confirmTransmit('open')}>TRANSMITIR</button>

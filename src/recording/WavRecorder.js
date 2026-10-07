@@ -13,7 +13,7 @@ export class WavRecorder {
     this.rate = ctx.sampleRate; this.channels = settings.channelCount;
     if (!navigator.storage?.getDirectory || !window.Worker || !window.AudioWorkletNode || !window.OfflineAudioContext)
       throw new Error('REC WAV requer armazenamento local OPFS e AudioWorklet neste navegador.');
-    if (![1,2].includes(this.channels) || ctx.state !== 'running') throw new Error('Fonte USB PCM não está pronta.');
+    if (![1,2].includes(this.channels) || ctx.state !== 'running') throw new Error('Fonte digital não está pronta.');
     const estimate = await navigator.storage.estimate?.();
     const available = estimate?.quota ? estimate.quota - (estimate.usage || 0) - 16 * 1024 * 1024 : MAX_WAV_BYTES;
     this.limit = Math.floor(Math.min(MAX_WAV_BYTES, available) / (this.channels * 2)) * this.channels * 2;
@@ -49,9 +49,10 @@ export class WavRecorder {
       }
     };
     this.node.onprocessorerror = () => this.fail(new Error('Processador PCM do REC falhou.'));
-    this.ended = () => this.stop('Entrada USB encerrada; confira o final do arquivo.').catch(() => {});
+    this.ended = () => this.stop('Fonte encerrada; confira o final do arquivo.').catch(() => {});
     this.contextChanged = () => { if (ctx.state !== 'running') this.stop('Contexto de áudio interrompido; arquivo parcial.').catch(() => {}); };
-    stream.getAudioTracks()[0].addEventListener('ended',this.ended);
+    stream?.getAudioTracks()[0]?.addEventListener('ended',this.ended);
+    this.session.onEnd?.add(this.ended);
     ctx.addEventListener('statechange',this.contextChanged);
     source.connect(this.node); this.node.connect(ctx.destination);
     this.update({status:'recording',seconds:0,message:''});
@@ -95,7 +96,8 @@ export class WavRecorder {
     this.update({status:'available',file:result,seconds:format.seconds,message:this.warning || data.warning || ''});
   }
   disconnect() {
-    this.session.stream.getAudioTracks()[0]?.removeEventListener('ended',this.ended);
+    this.session.stream?.getAudioTracks()[0]?.removeEventListener('ended',this.ended);
+    this.session.onEnd?.delete(this.ended);
     this.session.ctx.removeEventListener('statechange',this.contextChanged);
     if (this.node) {
       try { this.session.source.disconnect(this.node); } catch { /* USB may already have ended. */ }

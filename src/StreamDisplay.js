@@ -1,3 +1,4 @@
+import PlaylistPanel from './PlaylistPanel';
 import StreamSession from './StreamSession';
 import React, { useEffect, useState } from 'react';
 import useDigitalTheme from './useDigitalTheme';
@@ -21,25 +22,25 @@ const ISSUES = {
   'AUDIO CONTEXT SUSPENDED': ['ÁUDIO PAUSADO', 'Toque em TRANSMITIR para tentar novamente.'],
 };
 
-export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture, network = {}, recording = {} }) {
+export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture, network = {}, recording = {}, playlist = null }) {
   const { theme, cycleTheme } = useDigitalTheme();
   const recordingBusy = ['starting','finalizing'].includes(recording.status);
   const [recordingOpen,setRecordingOpen] = useState(Boolean(recording.file || recordingBusy));
   useEffect(()=>{if(recording.file || recordingBusy)setRecordingOpen(true);},[recording.file,recordingBusy]);
-  const showRecording = !network.dialog && recordingOpen && Boolean(recording.file || recordingBusy);
-  const showMain = !network.dialog && !showRecording;
+  const showRecording = !playlist && !network.dialog && recordingOpen && Boolean(recording.file || recordingBusy);
+  const showMain = !playlist && !network.dialog && !showRecording;
   const ready = capture.status === 'READY';
   const issue = network.role === 'receive' ? null : ISSUES[capture.message] || (capture.status === 'ERROR'
     ? ['FALHA NO ÁUDIO', 'Confira a entrada USB e tente novamente.'] : null);
   const mode = issue ? 'error' : capture.status === 'OPENING' ? 'opening'
     : capture.monitor ? 'monitor' : ready ? 'capture' : 'idle';
   let title = issue ? issue[0] : {
-    idle: 'PRONTO', opening: 'ABRINDO USB', capture: 'TRANSMITIR ATIVO', monitor: 'MONITOR ATIVO',
+    idle: 'PRONTO', opening: capture.kind==='voice'?'ABRINDO MIC':'ABRINDO USB', capture: 'TRANSMITIR ATIVO', monitor: 'MONITOR ATIVO',
   }[mode];
   let detail = issue ? issue[1] : {
-    idle: 'Toque em TRANSMITIR para iniciar a entrada USB.',
+    idle: 'Toque em TRANSMITIR para escolher a fonte.',
     opening: 'Aguardando a entrada e a permissão de áudio.',
-    capture: 'USB CONECTADO',
+    capture: capture.kind==='voice'?'MICROFONE':capture.kind==='player'?'PLAYER LOCAL':'USB CONECTADO',
     monitor: 'Sem áudio? Selecione a saída de mídia no Android.',
   }[mode];
   const receiving = network.role === 'receive';
@@ -50,7 +51,7 @@ export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture
       CONNECTING: ['CONECTANDO', 'Preparando o caminho de áudio.'],
       CONNECTED: ['TRANSMITINDO', 'RECEPTOR CONECTADO'],
       BUFFERING: ['BUFFERIZANDO', 'Preparando reprodução estável.'],
-      PLAYING: ['RECEBENDO', 'Áudio PCM sem compressão.'],
+      PLAYING: ['RECEBENDO', network.sourceKind==='voice'?(network.voiceMuted?'MICROFONE SILENCIADO':'Voz · baixa latência'):'Áudio PCM sem compressão.'],
       RECOVERING: ['RECUPERANDO', 'Aguardando margem no buffer.'],
       STOPPED: ['PAUSADO', 'Toque em PLAY / STOP para ouvir.'],
       DISCONNECTED: ['CONEXÃO PERDIDA', 'Procurando novamente.'],
@@ -87,13 +88,14 @@ export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture
         <h2>{title}</h2>
         <p className="stream-terminal-detail">{detail}</p>
         {(mode === 'capture' || (receiving && network.format)) && <p className="stream-terminal-technical">
-          <span>{channel}</span><span aria-hidden="true"> · </span><span>{format}</span>
+          <span>{channel}</span><span aria-hidden="true"> · </span><span>{capture.kind==='voice'||network.sourceKind==='voice'?'VOZ WEBRTC':format}</span>
         </p>}
       </div>
       {!issue && <footer className="stream-terminal-footer">
         {ready && network.role === 'send' && <StreamNightMode />}
-        {receiving ? <p className="stream-terminal-detail">BUFFER {Number(network.seconds || 0).toFixed(1)} s</p> : null}
-        {ready ? <div className="stream-terminal-bar-row">
+        {receiving && network.sourceKind!=='voice' ? <p className="stream-terminal-detail">BUFFER {Number(network.seconds || 0).toFixed(1)} s</p> : null}
+        {ready && capture.kind==='voice' && <button className="stream-voice-toggle" aria-pressed={!capture.muted} onClick={capture.toggleMute}>{capture.muted?'ATIVAR MICROFONE':'SILENCIAR MICROFONE'}</button>}
+        {ready && capture.kind!=='player' && capture.kind!=='voice' ? <div className="stream-terminal-bar-row">
           <span>SIGNAL</span><span className="stream-terminal-segments" role="meter" aria-label="SIGNAL"
             aria-valuemin={0} aria-valuemax={12} aria-valuenow={capture.signal}>
             {Array.from({ length: 12 }, (_, i) => <i key={i} data-lit={i < capture.signal} />)}
@@ -107,7 +109,8 @@ export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture
       {recording.file && <button type="button" onClick={()=>setRecordingOpen(true)}>ÚLTIMA GRAVAÇÃO</button>}
       </footer>}
     </div>}
-    {network.dialog && <StreamSession network={network} />}
+    {playlist && <PlaylistPanel playlist={playlist} />}
+    {!playlist && network.dialog && <StreamSession network={network} />}
     {showRecording && <StreamRecording recording={recording} color={theme.color} onClose={()=>setRecordingOpen(false)} panelOnly />}
   </section>;
 }

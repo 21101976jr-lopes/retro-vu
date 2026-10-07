@@ -32,13 +32,17 @@ export class StreamTransport {
     try {
       if (this.closed) return;
       if (!window.RTCPeerConnection || !window.AudioWorkletNode) throw new Error('WebRTC / AudioWorklet indisponível');
-      if (this.role === 'send') {
+      if (this.role === 'send' && this.session.kind === 'voice') {
+        this.voiceStateChanged=muted=>{for(const peer of this.peers.values())this.sendControl(peer,{type:'voice-state',muted});};
+        this.session.onVoiceState?.add(this.voiceStateChanged);
+        this.format={mode:'voice',version:1,sampleRate:this.session.ctx.sampleRate,channels:this.session.settings.channelCount};
+      } else if (this.role === 'send') {
         const { ctx, source, settings } = this.session;
         if (![1, 2].includes(settings.channelCount)) throw new Error('Quantidade de canais USB não informada');
         await ctx.audioWorklet.addModule(WORKLET);
         if (this.closed) return;
         this.format = { sampleRate: ctx.sampleRate, channels: settings.channelCount, sampleSize: 16,
-          inputRate: settings.sampleRate, version: 1 };
+          inputRate: settings.sampleRate, version: 1, sourceKind: this.session.kind || 'usb' };
         this.capture = new AudioWorkletNode(ctx, 'retro-capture', {
           channelCount: settings.channelCount, channelCountMode: 'explicit',
           numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
@@ -207,6 +211,8 @@ export class StreamTransport {
     const pc = new RTCPeerConnection({ iceServers: iceServers() });
     const peer = { id, pc, candidates: [], localCandidates: [], chain: Promise.resolve(), pendingPCM: 0, sequence: new Sequence() };
     this.peers.set(id, peer);
+    if(this.role==='send' && this.session.kind==='voice')this.session.stream.getAudioTracks().forEach(track=>pc.addTrack(track,this.session.stream));
+    pc.ontrack=event=>{if(this.role==='receive' && event.track.kind==='audio' && !peer.dead)this.prepareVoice(event,peer);};
     this.publish({ status: 'CONNECTING' });
     peer.timeout = setTimeout(() => { if (pc.connectionState !== 'connected') this.drop(id, true, 'connect-timeout-25s'); }, 25000);
     pc.onicecandidate = event => {
@@ -220,7 +226,7 @@ export class StreamTransport {
       debug('peer', { peer: id, state: pc.connectionState });
       if (pc.connectionState === 'connected') {
         clearTimeout(peer.timeout);
-        if (this.role === 'send' && peer.queue && peer.channel?.readyState === 'open') this.publish({ status: 'CONNECTED' });
+        if (this.role === 'send' && (peer.queue || this.session.kind==='voice') && peer.channel?.readyState === 'open') this.publish({ status: 'CONNECTED' });
       }
       if (['failed', 'closed'].includes(pc.connectionState)) this.drop(id, true, 'pc-' + pc.connectionState);
       if (pc.connectionState === 'disconnected') {
@@ -237,6 +243,7 @@ export class StreamTransport {
       debug('datachannel', { peer: peer.id, state: 'open', ordered: channel.ordered });
       if (this.role === 'send') {
         this.sendControl(peer, { type: 'format', ...this.format });
+        if(this.session.kind==='voice')this.sendControl(peer,{type:'voice-state',muted:!this.session.stream.getAudioTracks()[0].enabled});
       }
     };
     channel.onclose = () => this.drop(peer.id, true, 'dc-close');
@@ -246,7 +253,7 @@ export class StreamTransport {
       if (this.role === 'send') {
         try {
           const control = typeof data === 'string' ? JSON.parse(data) : {};
-          if (control.type === 'ready') this.activateSender(peer);
+          if (control.type === 'ready') {if(this.session.kind==='voice')this.publish({status:'CONNECTED',format:this.format});else this.activateSender(peer);}
           if (control.type === 'telemetry') peer.remoteTelemetry = { ...control, observedAt: Date.now() };
         } catch (error) { this.drop(peer.id, true, 'invalid-control', { error: this.errorInfo(error) }); }
         return;
@@ -257,6 +264,10 @@ export class StreamTransport {
         if (this.closed || peer.dead) return;
         if (typeof data === 'string') {
           const format = JSON.parse(data);
+          if(format.type==='voice-state'){this.voiceMuted=Boolean(format.muted);if(this.voiceGate)this.voiceGate.gain.setValueAtTime(this.playWanted&&!this.voiceMuted?1:0,this.ctx.currentTime);this.publish({voiceMuted:this.voiceMuted});peer.pendingPCM--;return;}
+          if(format.type==='format' && format.mode==='voice' && format.version===1){
+            this.format=format;this.publish({format,sourceKind:'voice'});this.sendControl(peer,{type:'ready'});peer.pendingPCM--;return;
+          }
           if (format.type === 'resync' && peer.playback) {
             peer.sequence = new Sequence(); peer.playback.port.postMessage({ type: 'reset' });
             debug('receiver-resync', { reason: format.reason, droppedBytes: format.droppedBytes });
@@ -314,6 +325,7 @@ export class StreamTransport {
       processorOptions: { channels: format.channels },
     });
     this.playback = peer.playback = node;
+    this.recordingSession={ready:true,ctx:this.ctx,source:node,settings:{sampleRate:format.sampleRate,channelCount:format.channels,sampleSize:16},onEnd:new Set()};
     this.analyser = this.ctx.createAnalyser(); this.analyser.fftSize = 2048; this.analyser.smoothingTimeConstant = 0.3;
     node.connect(this.analyser); node.connect(this.ctx.destination);
     node.port.postMessage({ type: 'play', value: this.playWanted });
@@ -337,8 +349,20 @@ export class StreamTransport {
     node.onprocessorerror = () => { this.drop(peer.id, true, 'playback-processor-error'); this.fail(new Error('Playback worklet failed')); };
     peer.awaitingReady = true;
     if (this.ctx.state === 'running') this.readyReceiver(peer);
-    this.publish({ status: this.ctx.state === 'running' ? 'BUFFERING' : 'NEEDS_PLAY', format, analyser: this.analyser });
+    this.publish({ status: this.ctx.state === 'running' ? 'BUFFERING' : 'NEEDS_PLAY', format, analyser: this.analyser, recordingSession:this.recordingSession,sourceKind:format.sourceKind || 'usb' });
     debug('received-format', format);
+  }
+  prepareVoice(event,peer) {
+    this.clearPlayback();
+    const stream=event.streams[0] || new MediaStream([event.track]);
+    const source=this.ctx.createMediaStreamSource(stream),gate=this.ctx.createGain();
+    this.voiceSource=source;this.voiceGate=gate;
+    this.analyser=this.ctx.createAnalyser();this.analyser.fftSize=2048;this.analyser.smoothingTimeConstant=0.3;
+    source.connect(gate);gate.connect(this.analyser);gate.connect(this.ctx.destination);gate.gain.value=this.playWanted&&!this.voiceMuted?1:0;
+    this.recordingSession={ready:true,ctx:this.ctx,source,stream,settings:{sampleRate:this.ctx.sampleRate,channelCount:event.track.getSettings().channelCount||1,sampleSize:16},onEnd:new Set()};
+    const update=()=>{if(this.closed||peer.dead)return;this.publish({sourceKind:'voice',analyser:this.analyser,recordingSession:this.recordingSession,seconds:0,playing:this.playWanted&&this.ctx.state==='running'&&!event.track.muted,status:this.ctx.state!=='running'?'NEEDS_PLAY':this.playWanted?'PLAYING':'STOPPED'});};
+    event.track.onunmute=update;event.track.onmute=update;event.track.onended=()=>this.drop(peer.id,true,'voice-track-ended');
+    this.ctx.resume().then(update).catch(error=>this.publish({status:'NEEDS_PLAY',error:error.message}));update();
   }
   readyReceiver(peer) {
     if (!peer.awaitingReady || peer.dead) return;
@@ -352,10 +376,16 @@ export class StreamTransport {
     } else this.playWanted = !this.playWanted;
     if (this.ctx.state !== 'running') { this.publish({ status: 'NEEDS_PLAY' }); return; }
     for (const peer of this.peers.values()) this.readyReceiver(peer);
+    if(this.voiceGate)this.voiceGate.gain.setValueAtTime(this.playWanted&&!this.voiceMuted?1:0,this.ctx.currentTime);
     this.playback?.port.postMessage({ type: 'play', value: this.playWanted });
-    this.publish({ status: this.playWanted ? 'BUFFERING' : 'STOPPED', playing: this.playWanted });
+    this.publish({ status: this.playWanted ? this.voiceGate?'PLAYING':'BUFFERING' : 'STOPPED', playing: this.playWanted });
   }
   clearPlayback() {
+    const finishing=[];
+    if(this.recordingSession){this.recordingSession.ready=false;for(const end of this.recordingSession.onEnd)finishing.push(end());this.recordingSession=null;}
+    if(finishing.length)this.recordingFinished=Promise.allSettled(finishing);
+    this.voiceSource?.disconnect();this.voiceGate?.disconnect();this.voiceSource=null;this.voiceGate=null;
+    this.publish({recordingSession:null});
     if (this.playback) { this.playback.port.onmessage = null; this.playback.port.close(); this.playback.disconnect(); }
     this.analyser?.disconnect(); this.playback = null; this.analyser = null;
   }
@@ -377,6 +407,7 @@ export class StreamTransport {
   }
   close(reason = 'session-stop') {
     clearInterval(this.metricTimer);
+    this.session?.onVoiceState?.delete(this.voiceStateChanged);
     this.closed = true; this.signal?.close();
     for (const id of [...this.peers.keys()]) this.drop(id, false, reason);
     if (this.capture) {
@@ -385,6 +416,8 @@ export class StreamTransport {
       this.capture.disconnect(); this.capture = null;
     }
     this.clearPlayback();
-    if (this.role === 'receive' && this.ctx?.state !== 'closed') this.ctx.close().catch(() => {});
+    if (this.role === 'receive' && this.ctx?.state !== 'closed') {
+      const ctx=this.ctx;if(this.recordingFinished)Promise.resolve(this.recordingFinished).finally(()=>ctx.close().catch(()=>{}));else ctx.close().catch(()=>{});
+    }
   }
 }
