@@ -160,10 +160,21 @@ test('voice receiver uses media source, immediate output gate and a digital REC 
  const source={connect:jest.fn(),disconnect:jest.fn()},gain={connect:jest.fn(),disconnect:jest.fn(),gain:{value:1,setValueAtTime:jest.fn()}};
  rx.ctx.createMediaStreamSource=jest.fn(()=>source);rx.ctx.createGain=()=>gain;
  const peer=rx.makePeer('tx'),track={kind:'audio',muted:false,getSettings:()=>({channelCount:1})},stream={getAudioTracks:()=>[track]};
- peer.pc.ontrack({track,streams:[stream]});await Promise.resolve();
+ peer.pc.connectionState='connected';peer.pc.ontrack({track,streams:[stream]});await Promise.resolve();
  expect(rx.recordingSession.source).toBe(source);expect(gain.connect).toHaveBeenCalledWith(rx.ctx.destination);expect(nodes).toHaveLength(0);
  expect(update).toHaveBeenCalledWith(expect.objectContaining({status:'PLAYING',sourceKind:'voice',seconds:0}));
  await rx.togglePlay();expect(gain.gain.setValueAtTime).toHaveBeenCalledWith(0,undefined);expect(rx.ctx.close).not.toHaveBeenCalled();rx.close();expect(source.disconnect).toHaveBeenCalled();
+});
+
+test('voice SDP is negotiated as media before control channel opens; muted track is not announced as playing',async()=>{
+ const update=jest.fn(),rx=new StreamTransport('receive',null,update);await rx.start();
+ await rx.onSignal({peers:[{id:'tx'}],messages:[{from:'tx',type:'description',value:{type:'offer',sdp:'v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n',sourceKind:'voice'}}]});
+ const peer=rx.peers.get('tx');expect(peer.voice).toBe(true);expect(update).toHaveBeenCalledWith({sourceKind:'voice',seconds:0});expect(nodes).toHaveLength(0);
+ rx.ctx.createMediaStreamSource=()=>({connect:jest.fn(),disconnect:jest.fn()});rx.ctx.createGain=()=>({connect:jest.fn(),disconnect:jest.fn(),gain:{}});
+ const track={kind:'audio',muted:true,getSettings:()=>({channelCount:1})};
+ peer.pc.ontrack({track,streams:[{}]});await Promise.resolve();expect(update).toHaveBeenLastCalledWith(expect.objectContaining({status:'CONNECTING',playing:false}));
+ peer.pc.connectionState='connected';peer.pc.onconnectionstatechange();expect(update).toHaveBeenLastCalledWith(expect.objectContaining({status:'CONNECTING',playing:false}));
+ track.muted=false;track.onunmute();expect(update).toHaveBeenLastCalledWith(expect.objectContaining({status:'PLAYING',playing:true}));rx.close();
 });
 test('receiver teardown waits for WAV finalization before closing context',async()=>{
  const rx=new StreamTransport('receive',null,jest.fn());await rx.start();const peer=rx.makePeer('tx');await rx.preparePlayback({channels:1,sampleRate:48000,sampleSize:16},peer);

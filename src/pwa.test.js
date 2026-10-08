@@ -2,7 +2,7 @@ const fs=require('fs'),path=require('path'),vm=require('vm'),os=require('os');
 const {buildPwa}=require('../scripts/build-pwa.cjs');
 function worker(){
  const handlers={},cache={addAll:jest.fn().mockResolvedValue(),match:jest.fn().mockResolvedValue('cached')};
- const context={URL,Request:class{constructor(url,options){this.url=url;this.options=options;}},
+ const context={URL,setTimeout,clearTimeout,MessageChannel:class{constructor(){this.port1={close:jest.fn()};this.port2={reply:data=>this.port1.onmessage({data})};}},Request:class{constructor(url,options){this.url=url;this.options=options;}},
   caches:{open:jest.fn().mockResolvedValue(cache),keys:async()=>['retro-vu-shell-old','other-cache'],delete:jest.fn().mockResolvedValue(true)},
   clients:{claim:jest.fn(),matchAll:jest.fn().mockResolvedValue([{id:'one'}])},location:{origin:'https://retro.test'},
   fetch:jest.fn(),skipWaiting:jest.fn(),addEventListener:(type,handler)=>{handlers[type]=handler;}};
@@ -37,4 +37,14 @@ test('waiting update activates only on explicit idle request from the sole clien
  context.clients.matchAll.mockResolvedValue([{id:'one'},{id:'two'}]);
  handlers.message({data:{type:'ACTIVATE_IDLE',busy:false},source,waitUntil:p=>{job=p;}});await job;expect(context.skipWaiting).not.toHaveBeenCalled();expect(source.postMessage).toHaveBeenCalled();
  context.clients.matchAll.mockResolvedValue([{id:'one'}]);handlers.message({data:{type:'ACTIVATE_IDLE',busy:false},source,waitUntil:p=>{job=p;}});await job;expect(context.skipWaiting).toHaveBeenCalledTimes(1);
+});
+
+test('automatic update requires every open client to report idle',async()=>{
+ const {handlers,context}=worker();let job;
+ const client=idle=>({postMessage:(message,ports)=>ports[0].reply({idle})});
+ context.clients.matchAll.mockResolvedValue([client(true),client(false)]);
+ handlers.message({data:{type:'TRY_ACTIVATE'},waitUntil:p=>{job=p;}});await job;expect(context.skipWaiting).not.toHaveBeenCalled();
+ context.clients.matchAll.mockResolvedValue([client(true),client(true)]);
+ handlers.message({data:{type:'TRY_ACTIVATE'},waitUntil:p=>{job=p;}});await job;expect(context.skipWaiting).toHaveBeenCalledTimes(1);
+ expect(context.caches.delete).not.toHaveBeenCalled();
 });

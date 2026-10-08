@@ -187,7 +187,12 @@ export class StreamTransport {
       if (!peer) continue;
       try {
         if (message.type === 'description') {
-          await peer.pc.setRemoteDescription(message.value);
+          if(this.role==='receive') {
+            const voice=message.value.sourceKind==='voice' || /^m=audio [1-9]/m.test(message.value.sdp||'');
+            peer.voice=voice;
+            if(voice)this.publish({sourceKind:'voice',seconds:0});
+          }
+          await peer.pc.setRemoteDescription({type:message.value.type,sdp:message.value.sdp});
           for (const candidate of peer.candidates) await peer.pc.addIceCandidate(candidate);
           peer.candidates = [];
           if (message.value.type === 'offer') {
@@ -202,7 +207,8 @@ export class StreamTransport {
     }
   }
   sendDescription(peer) {
-    this.signal.send(peer.id, 'description', peer.pc.localDescription.toJSON());
+    this.signal.send(peer.id, 'description', {...peer.pc.localDescription.toJSON(),
+      ...(this.role==='send'&&this.session.kind==='voice'?{sourceKind:'voice'}:{})});
     peer.descriptionSent = true;
     for (const candidate of peer.localCandidates) this.signal.send(peer.id, 'candidate', candidate);
     peer.localCandidates = [];
@@ -212,7 +218,10 @@ export class StreamTransport {
     const peer = { id, pc, candidates: [], localCandidates: [], chain: Promise.resolve(), pendingPCM: 0, sequence: new Sequence() };
     this.peers.set(id, peer);
     if(this.role==='send' && this.session.kind==='voice')this.session.stream.getAudioTracks().forEach(track=>pc.addTrack(track,this.session.stream));
-    pc.ontrack=event=>{if(this.role==='receive' && event.track.kind==='audio' && !peer.dead)this.prepareVoice(event,peer);};
+    pc.ontrack=event=>{
+      if(this.role!=='receive'||event.track.kind!=='audio'||peer.dead)return;
+      try{this.prepareVoice(event,peer);}catch(error){debug('voice-playback-error',{message:error.message});this.publish({sourceKind:'voice',status:'ERROR',error:error.message});}
+    };
     this.publish({ status: 'CONNECTING' });
     peer.timeout = setTimeout(() => { if (pc.connectionState !== 'connected') this.drop(id, true, 'connect-timeout-25s'); }, 25000);
     pc.onicecandidate = event => {
@@ -226,6 +235,7 @@ export class StreamTransport {
       debug('peer', { peer: id, state: pc.connectionState });
       if (pc.connectionState === 'connected') {
         clearTimeout(peer.timeout);
+        peer.updateVoice?.();
         if (this.role === 'send' && (peer.queue || this.session.kind==='voice') && peer.channel?.readyState === 'open') this.publish({ status: 'CONNECTED' });
       }
       if (['failed', 'closed'].includes(pc.connectionState)) this.drop(id, true, 'pc-' + pc.connectionState);
@@ -253,7 +263,7 @@ export class StreamTransport {
       if (this.role === 'send') {
         try {
           const control = typeof data === 'string' ? JSON.parse(data) : {};
-          if (control.type === 'ready') {if(this.session.kind==='voice')this.publish({status:'CONNECTED',format:this.format});else this.activateSender(peer);}
+          if (control.type === 'ready') {if(this.session.kind==='voice'){if(peer.pc.connectionState==='connected')this.publish({status:'CONNECTED',format:this.format});}else this.activateSender(peer);}
           if (control.type === 'telemetry') peer.remoteTelemetry = { ...control, observedAt: Date.now() };
         } catch (error) { this.drop(peer.id, true, 'invalid-control', { error: this.errorInfo(error) }); }
         return;
@@ -354,13 +364,20 @@ export class StreamTransport {
   }
   prepareVoice(event,peer) {
     this.clearPlayback();
-    const stream=event.streams[0] || new MediaStream([event.track]);
+    const stream=event.streams?.[0] || new MediaStream([event.track]);
     const source=this.ctx.createMediaStreamSource(stream),gate=this.ctx.createGain();
     this.voiceSource=source;this.voiceGate=gate;
     this.analyser=this.ctx.createAnalyser();this.analyser.fftSize=2048;this.analyser.smoothingTimeConstant=0.3;
     source.connect(gate);gate.connect(this.analyser);gate.connect(this.ctx.destination);gate.gain.value=this.playWanted&&!this.voiceMuted?1:0;
-    this.recordingSession={ready:true,ctx:this.ctx,source,stream,settings:{sampleRate:this.ctx.sampleRate,channelCount:event.track.getSettings().channelCount||1,sampleSize:16},onEnd:new Set()};
-    const update=()=>{if(this.closed||peer.dead)return;this.publish({sourceKind:'voice',analyser:this.analyser,recordingSession:this.recordingSession,seconds:0,playing:this.playWanted&&this.ctx.state==='running'&&!event.track.muted,status:this.ctx.state!=='running'?'NEEDS_PLAY':this.playWanted?'PLAYING':'STOPPED'});};
+    this.recordingSession={ready:true,ctx:this.ctx,source,stream,settings:{sampleRate:this.ctx.sampleRate,channelCount:event.track.getSettings?.().channelCount||1,sampleSize:16},onEnd:new Set()};
+    const update=()=>{
+      if(this.closed||peer.dead)return;
+      const connected=peer.pc.connectionState==='connected';
+      this.publish({sourceKind:'voice',analyser:this.analyser,recordingSession:this.recordingSession,seconds:0,
+        playing:connected&&this.playWanted&&this.ctx.state==='running'&&!event.track.muted,
+        status:!connected?'CONNECTING':this.ctx.state!=='running'?'NEEDS_PLAY':!this.playWanted?'STOPPED':event.track.muted?'CONNECTING':'PLAYING'});
+    };
+    peer.updateVoice=update;
     event.track.onunmute=update;event.track.onmute=update;event.track.onended=()=>this.drop(peer.id,true,'voice-track-ended');
     this.ctx.resume().then(update).catch(error=>this.publish({status:'NEEDS_PLAY',error:error.message}));update();
   }
@@ -377,6 +394,7 @@ export class StreamTransport {
     if (this.ctx.state !== 'running') { this.publish({ status: 'NEEDS_PLAY' }); return; }
     for (const peer of this.peers.values()) this.readyReceiver(peer);
     if(this.voiceGate)this.voiceGate.gain.setValueAtTime(this.playWanted&&!this.voiceMuted?1:0,this.ctx.currentTime);
+    if(this.voiceGate){for(const peer of this.peers.values())peer.updateVoice?.();return;}
     this.playback?.port.postMessage({ type: 'play', value: this.playWanted });
     this.publish({ status: this.playWanted ? this.voiceGate?'PLAYING':'BUFFERING' : 'STOPPED', playing: this.playWanted });
   }

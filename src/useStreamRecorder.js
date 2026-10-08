@@ -40,12 +40,11 @@ export default function useStreamRecorder(session) {
       if (!o.mounted || o.current !== recorder) return;
       if (values.status === 'available') {
         o.file=values.file;o.files=[values.file,...o.files];o.current=null;setFiles([...o.files]);
-        // Finalization is asynchronous: user activation may have expired. Present export immediately,
-        // but leave privileged picker/download to the explicit, prominent SALVAR WAV gesture.
+        // WavRecorder committed the file to OPFS. Keep playback and navigation untouched.
       }
       if (values.status === 'error') o.current = null;
-      setState(s=>({...s,...values}));
-      if(values.status === 'available' && typeof window.showSaveFilePicker !== 'function') exportFile();
+      setState(s=>({...s,...values,...(values.status==='error'?{file:o.file}:{})}));
+      // Archive is committed by WavRecorder; export is always an explicit later action.
     });
     o.current = recorder;recorder.start().catch(error=>recorder.fail(error));
   }

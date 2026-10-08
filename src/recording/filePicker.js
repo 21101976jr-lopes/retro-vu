@@ -12,10 +12,12 @@ export async function openAudioFile(input, onChange) {
   } catch(error) {if(error.name!=='AbortError')input?.click();}
 }
 
-export async function openAudioFolder(input,onChange){
+export async function openAudioFolder(input,onChange,onStatus=()=>{}){
+ onStatus('');
  if(!window.showDirectoryPicker){await openAudioFile(input,onChange);return;}
  try{const dir=await window.showDirectoryPicker({startIn:'music'}),files=[];
  for await(const handle of dir.values())if(handle.kind==='file'&&/\.(mp3|m4a|wav|flac|aac|webm)$/i.test(handle.name))files.push(await handle.getFile());
- files.sort((a,b)=>a.name.localeCompare(b.name));if(files.length)onChange({target:{files,value:''}});
- }catch(error){if(error.name!=='AbortError')await openAudioFile(input,onChange);}
+ files.sort((a,b)=>a.name.localeCompare(b.name));
+ if(files.length)onChange({target:{files,value:''}});else onStatus('Nenhum áudio nesta pasta. Use ABRIR ÁUDIOS.');
+ }catch(error){if(error.name!=='AbortError')onStatus('Pasta não autorizada ou indisponível. Use ABRIR ÁUDIOS.');}
 }

@@ -110,6 +110,7 @@ export default function App() {
   const recording = useStreamRecorder(activeSession || streamNetwork.recordingSession);
   const liveActive = ['OPENING', 'READY'].includes(capture.status);
   const [playlistOpen,setPlaylistOpen]=useState(false);
+  const [pickerMessage,setPickerMessage]=useState('');
   const [queue,setQueue]=useState([]),[queueIndex,setQueueIndex]=useState(0);
   const [repeat,setRepeat]=useState(false),[shuffle,setShuffle]=useState(false);
   const playlistRef=useRef({files:[],index:0,repeat:false,shuffle:false});
@@ -321,6 +322,7 @@ export default function App() {
   }, [stopAnim]);
 
   const playbackRef=useRef(null);
+  const playbackRevision=useRef(0);
   const handlePlay = useCallback(() => {
     if (!audioElRef.current) { alert('Carregue uma música primeiro (LOAD / ABRIR).'); return; }
     ensureCtx();
@@ -333,7 +335,14 @@ export default function App() {
       setPlayerSession({ready:true,kind:'player',ctx:audioCtxRef.current,source:bus,analyser:analyserRef.current,
         settings:{sampleRate:audioCtxRef.current.sampleRate,channelCount:2,sampleSize:16}});
     }
-    audioElRef.current.play().then(()=>{setIsPlaying(true);setIsListening(true);startAnim();}).catch(err=>{setIsPlaying(false);setIsListening(false);alert('Erro: '+err.message);});
+    const revision=++playbackRevision.current;
+    audioElRef.current.play().then(()=>{
+      if(revision!==playbackRevision.current||audioElRef.current.paused)return;
+      setIsPlaying(true);setIsListening(true);startAnim();
+    }).catch(err=>{
+      if(revision!==playbackRevision.current||err.name==='AbortError')return;
+      setIsPlaying(false);setIsListening(false);alert('Erro: '+err.message);
+    });
     setAudioMode('player');
   }, [ensureCtx,startAnim]);
   playbackRef.current=handlePlay;
@@ -351,7 +360,7 @@ export default function App() {
       });
       audio.addEventListener('error',()=>{setIsPlaying(false);setIsListening(false);});
     }
-    audio.pause();if(audio.src)URL.revokeObjectURL(audio.src);
+    playbackRevision.current++;audio.pause();if(audio.src)URL.revokeObjectURL(audio.src);
     audio.src=URL.createObjectURL(file);
     setTrackName(file.name.replace(/\.[^/.]+$/,'').replace(/[_-]/g,' ').trim());
     setProgress(0);setIsPlaying(false);setIsListening(false);setAudioMode('player');
@@ -363,10 +372,10 @@ export default function App() {
     if(!files.length)return;
     playlistRef.current.files=files;setQueue(files);loadTrack(0,Boolean(audioElRef.current&&!audioElRef.current.paused));e.target.value='';
   },[loadTrack]);
-  const handlePause=useCallback(()=>{audioElRef.current?.pause();setIsPlaying(false);setIsListening(false);stopAnim();},[stopAnim]);
-  const handleStop=useCallback(()=>{audioElRef.current?.pause();if(audioElRef.current)audioElRef.current.currentTime=0;setIsPlaying(false);setIsListening(false);setProgress(0);stopAnim();},[stopAnim]);
+  const handlePause=useCallback(()=>{playbackRevision.current++;audioElRef.current?.pause();setIsPlaying(false);setIsListening(false);stopAnim();},[stopAnim]);
+  const handleStop=useCallback(()=>{playbackRevision.current++;audioElRef.current?.pause();if(audioElRef.current)audioElRef.current.currentTime=0;setIsPlaying(false);setIsListening(false);setProgress(0);stopAnim();},[stopAnim]);
   useEffect(()=>()=>{audioElRef.current?.pause();if(audioElRef.current?.src)URL.revokeObjectURL(audioElRef.current.src);audioCtxRef.current?.close().catch(()=>{});},[]);
-  function stepTrack(direction){const q=playlistRef.current;const index=nextTrack(q.index,q.files.length,{direction,repeat:true,shuffle:q.shuffle});if(index!==null)loadTrack(index,isPlaying);}
+  function stepTrack(direction){const q=playlistRef.current;const index=nextTrack(q.index,q.files.length,{direction,repeat:true,shuffle:direction>0&&q.shuffle});if(index!==null)loadTrack(index,isPlaying);}
   async function stopSource(){const pending=recording.stop();if(pending)await pending;streamNetwork.stop();streamInput.stop();voice.stop();if(playerSending&&!playerMonitor)audioElSrcRef.current?.connect(audioCtxRef.current.destination);setPlayerSending(false);setPlayerMonitor(false);}
   function beginTransmit(kind='usb'){
     setSourceKind(kind);
@@ -470,7 +479,7 @@ export default function App() {
           <img src="/images/stream.png" alt="STREAM" style={S.bg} draggable={false} />
           <input aria-label="Arquivos de áudio" ref={fileInputRef} type="file" accept="audio/*" multiple style={{display:'none'}} onChange={handleFileChange} />
           <StreamDisplay playlist={playlistOpen?{name:trackName,index:queueIndex,length:queue.length,repeat,shuffle,playing:isPlaying,
-            files:()=>openAudioFile(fileInputRef.current,handleFileChange),folder:()=>openAudioFolder(fileInputRef.current,handleFileChange),
+            message:pickerMessage,files:()=>{setPickerMessage('');openAudioFile(fileInputRef.current,handleFileChange);},folder:()=>openAudioFolder(fileInputRef.current,handleFileChange,setPickerMessage),
             previous:()=>stepTrack(-1),next:()=>stepTrack(1),toggleRepeat:()=>setRepeat(!repeat),toggleShuffle:()=>setShuffle(!shuffle),
             play:isPlaying?handlePause:handlePlay,close:()=>setPlaylistOpen(false)}:null} recording={recording} network={streamNetwork} capture={capture} geometry={STREAM.DISPLAY} baseWidth={STREAM.WIDTH} baseHeight={STREAM.HEIGHT} />
           {/* Hotspots definitivos. VOLTAR apenas navega; as sessões de áudio são globais. */}
@@ -481,10 +490,10 @@ export default function App() {
                 : label === 'MONITOR' ? capture.monitor
                 : label === 'RECEBER' ? streamNetwork.role === 'receive'
                 : label === 'PLAY / STOP' && streamNetwork.role === 'receive' ? streamNetwork.playing : undefined}
-              onClick={label === 'VOLTAR' ? () => { if ((!recording.file && recording.status !== 'finalizing') || window.confirm('A gravação permanece no aplicativo. A exportação pode estar pendente; volte ao STREAM para ouvir ou salvar WAV. Sair do display?')) setScreen('radio'); }
+              onClick={label === 'VOLTAR' ? () => {setPlaylistOpen(false);setScreen('radio');}
                 : label === 'TRANSMITIR' ? () => { if(liveActive)stopSource();else streamNetwork.requestTransmit(beginTransmit); }
                 : label === 'RECEBER' ? async () => { const pending = recording.stop(); if (pending) await pending; streamInput.stop();voice.stop();handlePause();if(playerSending&&!playerMonitor)audioElSrcRef.current?.connect(audioCtxRef.current.destination);setPlayerSending(false);setPlayerMonitor(false); if (streamNetwork.role === 'send') streamNetwork.stop(); streamNetwork.toggleReceive(); }
-                : label === 'PLAY / STOP' ? streamNetwork.togglePlay
+                : label === 'PLAY / STOP' ? streamNetwork.role==='receive'?streamNetwork.togglePlay:audioElRef.current?()=>audioElRef.current.paused?handlePlay():handlePause():undefined
                 : label === 'MONITOR' ? toggleMonitor
                 : label === 'REC' ? recording.toggle : undefined}
               style={{ ...S.hs, background: 'transparent', border: 0, padding: 0,
@@ -523,43 +532,16 @@ export default function App() {
           <Led xPct={RADIO.LED_PLAYER_X} yPct={RADIO.LED_PLAYER_Y} wPct={RADIO.LED_SMALL_W} on={lights.player} />
           <Led xPct={RADIO.LED_STATUS_X} yPct={RADIO.LED_STATUS_Y} wPct={RADIO.LED_LARGE_W} on={lights.listening} />
 
-          {/* Display NOW PLAYING */}
-          <div style={{
-            position: 'absolute',
-            left: `${RADIO.NP_LEFT}%`,   top: `${RADIO.NP_TOP}%`,
-            right: `${RADIO.NP_RIGHT}%`, bottom: `${RADIO.NP_BOT}%`,
-            display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center',
-            overflow: 'hidden', pointerEvents: 'none',
-            padding: '0 2%', gap: '1px',
-          }}>
-            {trackName ? (
-              <>
-                <span style={{
-                  color: digitalTheme.color, fontFamily: "'Oswald',sans-serif",
-                  fontWeight: 400, fontSize: 'clamp(6px,.8vw,10px)',
-                  opacity: 0.55, letterSpacing: 3, lineHeight: 1,
-                }}>NOW PLAYING {queue.length>1? queueIndex+1+'/'+queue.length : ''}</span>
-                <span style={{
-                  color: digitalTheme.color, fontFamily: "'Oswald',sans-serif",
-                  fontWeight: 700, fontSize: 'clamp(10px,1.4vw,18px)',
-                  textShadow: `0 0 14px ${digitalTheme.color}`,
-                  whiteSpace: 'normal', wordBreak: 'break-word',
-                  textAlign: 'center', lineHeight: 1.2,
-                  maxWidth: '100%', overflow: 'hidden',
-                  display: '-webkit-box',
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: 'vertical',
-                }}>{trackName}</span>
-              </>
-            ) : (
-              <span style={{
-                color: digitalTheme.color, fontFamily: "'Oswald',sans-serif",
-                fontWeight: 400, fontSize: 'clamp(10px,1.4vw,18px)',
-                opacity: 0.25, letterSpacing: 3,
-              }}>LOAD / ABRIR</span>
-            )}
-          </div>
+          {/* Visor original: contador e nome do arquivo, sem painel externo. */}
+          <button type="button" aria-label="Abrir controles do player"
+            onClick={()=>{setPlaylistOpen(true);openStream();}}
+            style={{position:'absolute',left:`${RADIO.NP_LEFT}%`,right:`${RADIO.NP_RIGHT}%`,
+              top:`${RADIO.NP_TOP}%`,bottom:`${RADIO.NP_BOT}%`,display:'flex',alignItems:'center',
+              gap:'5%',padding:'0 2%',border:0,background:'transparent',color:digitalTheme.color,
+              overflow:'hidden',fontFamily:"'Oswald',sans-serif",fontSize:'clamp(10px,1.4vw,18px)',cursor:'pointer'}}>
+            {queue.length>0 && <span style={{flexShrink:0,fontSize:'0.75em'}}>{String(queueIndex+1).padStart(2,'0')}/{String(queue.length).padStart(2,'0')}</span>}
+            <span title={trackName} style={{minWidth:0,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{trackName||'LOAD / ABRIR'}</span>
+          </button>
 
           {/* Display digital de sensibilidade — Illustrator */}
           <div style={{
@@ -632,7 +614,6 @@ export default function App() {
                style={{ ...S.hs, right: '2%', top: '43%', width: '16%', height: '15%', cursor: 'ns-resize' }}
           />
 
-          <button aria-label="Playlist" onClick={()=>{setPlaylistOpen(true);openStream();}} style={{position:'absolute',left:'33%',top:'43%',width:'34%',height:'6%',background:'#080a08',color:digitalTheme.color,border:'1px solid currentColor',fontFamily:'monospace',fontSize:'clamp(10px,1.4vw,18px)'}}>PLAYLIST {queue.length?queueIndex+1+'/'+queue.length:''}</button>
           <input aria-label="Arquivos de áudio" ref={fileInputRef} type="file" accept="audio/*" multiple
                  style={{ display: 'none' }} onChange={handleFileChange} />
         </div>

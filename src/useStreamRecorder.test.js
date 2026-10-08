@@ -44,7 +44,7 @@ test('recover pending WAV without deleting on unmount; new REC preserves prior r
  const fresh={id:'new.wav',url:'blob:new',name:'new.wav'};
  await act(async()=>update({status:'available',file:fresh}));
  expect(result.current.files.map(f=>f.id)).toEqual(['new.wav','old.wav']);
- expect(exportRecording).toHaveBeenCalledWith(fresh);
+ expect(exportRecording).not.toHaveBeenCalled();
  exportRecording.mockRejectedValue(new DOMException('cancel','AbortError'));
  await act(async()=>result.current.exportFile());
  expect(result.current.message).toMatch(/cancelada.*preservado/);

@@ -3,6 +3,23 @@ const VERSION = '__BUILD_VERSION__';
 const ASSETS = /*__PRECACHE__*/ [];
 const PREFIX = 'retro-vu-shell-';
 const CACHE = PREFIX + VERSION;
+let activationCheck;
+function activateWhenIdle() {
+  if(activationCheck)return activationCheck;
+  activationCheck=(async()=>{
+    const windows=await globalThis.clients.matchAll({type:'window',includeUncontrolled:true});
+    if(!windows.length)return;
+    const answers=await Promise.all(windows.map(client=>new Promise(resolve=>{
+      const channel=new MessageChannel();
+      const finish=value=>{clearTimeout(timer);channel.port1.close();resolve(value);};
+      const timer=setTimeout(()=>finish(false),3000);
+      channel.port1.onmessage=event=>finish(event.data?.idle===true);
+      client.postMessage({type:'CHECK_IDLE'},[channel.port2]);
+    })));
+    if(answers.every(Boolean))await globalThis.skipWaiting();
+  })().finally(()=>{activationCheck=null;});
+  return activationCheck;
+}
 globalThis.addEventListener('install', event => {
   // Never replace a worker beneath ongoing audio. New version waits for all windows to close,
   // or for the single idle client to explicitly request activation.
@@ -15,6 +32,7 @@ globalThis.addEventListener('activate', event => {
   })());
 });
 globalThis.addEventListener('message',event=>{
+  if(event.data?.type==='TRY_ACTIVATE'){event.waitUntil(activateWhenIdle());return;}
   if(event.data?.type!=='ACTIVATE_IDLE' || event.data.busy!==false)return;
   event.waitUntil((async()=>{
     const clients=await globalThis.clients.matchAll({type:'window',includeUncontrolled:true});

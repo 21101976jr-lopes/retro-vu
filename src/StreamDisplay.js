@@ -24,10 +24,16 @@ const ISSUES = {
 
 export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture, network = {}, recording = {}, playlist = null }) {
   const { theme, cycleTheme } = useDigitalTheme();
-  const recordingBusy = ['starting','finalizing'].includes(recording.status);
-  const [recordingOpen,setRecordingOpen] = useState(Boolean(recording.file || recordingBusy));
-  useEffect(()=>{if(recording.file || recordingBusy)setRecordingOpen(true);},[recording.file,recordingBusy]);
-  const showRecording = !playlist && !network.dialog && recordingOpen && Boolean(recording.file || recordingBusy);
+  const [recordingOpen,setRecordingOpen] = useState(false);
+  const [recordingNotice,setRecordingNotice] = useState(false);
+  useEffect(()=>{
+    if(['starting','recording'].includes(recording.status))setRecordingOpen(false);
+    if(recording.status!=='available')return;
+    setRecordingNotice(true);
+    const timer=setTimeout(()=>setRecordingNotice(false),5000);
+    return ()=>clearTimeout(timer);
+  },[recording.file,recording.status]);
+  const showRecording = !playlist && !network.dialog && recordingOpen && Boolean(recording.file);
   const showMain = !playlist && !network.dialog && !showRecording;
   const ready = capture.status === 'READY';
   const issue = network.role === 'receive' ? null : ISSUES[capture.message] || (capture.status === 'ERROR'
@@ -93,7 +99,7 @@ export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture
       </div>
       {!issue && <footer className="stream-terminal-footer">
         {ready && network.role === 'send' && <StreamNightMode />}
-        {receiving && network.sourceKind!=='voice' ? <p className="stream-terminal-detail">BUFFER {Number(network.seconds || 0).toFixed(1)} s</p> : null}
+        {receiving && network.format && network.sourceKind!=='voice' ? <p className="stream-terminal-detail">BUFFER {Number(network.seconds || 0).toFixed(1)} s</p> : null}
         {ready && capture.kind==='voice' && <button className="stream-voice-toggle" aria-pressed={!capture.muted} onClick={capture.toggleMute}>{capture.muted?'ATIVAR MICROFONE':'SILENCIAR MICROFONE'}</button>}
         {ready && capture.kind!=='player' && capture.kind!=='voice' ? <div className="stream-terminal-bar-row">
           <span>SIGNAL</span><span className="stream-terminal-segments" role="meter" aria-label="SIGNAL"
@@ -106,7 +112,10 @@ export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture
       {network.share && <div className="stream-session"><button type="button" onClick={network.showShare}>SESSÃO PRIVADA</button></div>}
 
       {recording.status==='recording' && <span className="stream-rec-status">REC ATIVO</span>}
-      {recording.file && <button type="button" onClick={()=>setRecordingOpen(true)}>ÚLTIMA GRAVAÇÃO</button>}
+      {recording.status==='finalizing' && <span role="status">FINALIZANDO WAV</span>}
+      {recording.status==='error' && <span role="status">{recording.message}</span>}
+      {recordingNotice && recording.status==='available' && <span role="status">WAV PRESERVADO</span>}
+      {recording.file && <button type="button" onClick={()=>setRecordingOpen(true)}>EXPORTAR WAV</button>}
       </footer>}
     </div>}
     {playlist && <PlaylistPanel playlist={playlist} />}

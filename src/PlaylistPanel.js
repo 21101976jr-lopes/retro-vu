@@ -4,5 +4,6 @@ export default function PlaylistPanel({playlist:p}){return <div className="strea
  <div><button onClick={p.files}>ABRIR ÁUDIOS</button><button onClick={p.folder}>PASTA / ÁUDIOS</button></div>
  <div><button disabled={!p.length} onClick={p.previous}>◀ ANTERIOR</button><button disabled={!p.length} onClick={p.next}>PRÓXIMA ▶</button></div>
  <div><button aria-pressed={p.repeat} onClick={p.toggleRepeat}>REPETIR {p.repeat?'ON':'OFF'}</button><button aria-pressed={p.shuffle} onClick={p.toggleShuffle}>ALEATÓRIO {p.shuffle?'ON':'OFF'}</button></div>
- <div><button disabled={!p.length} onClick={p.play}>{p.playing?'PAUSAR':'PLAY'}</button><button onClick={p.close}>VOLTAR</button></div>
+ {p.message && <p role="status">{p.message}</p>}
+ <p>Use PLAY / STOP e VOLTAR no painel.</p>
  </section></div>;}

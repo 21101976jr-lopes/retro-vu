@@ -81,5 +81,14 @@ test('session and recording panels unmount previous main content',()=>{
  view.rerender(<StreamDisplay {...props} network={{dialog:'send'}}/>);
  expect(screen.getByText('TRANSMITIR ÁUDIO?')).toBeInTheDocument();expect(screen.queryByText('PRONTO')).not.toBeInTheDocument();
  view.rerender(<StreamDisplay {...props} recording={{status:'finalizing'}}/>);
- expect(screen.getByText('FINALIZANDO GRAVAÇÃO')).toBeInTheDocument();expect(screen.queryByText('TRANSMITIR ÁUDIO?')).not.toBeInTheDocument();expect(screen.queryByText('PRONTO')).not.toBeInTheDocument();
+ expect(screen.getByText('FINALIZANDO WAV')).toBeInTheDocument();expect(screen.queryByRole('dialog')).not.toBeInTheDocument();expect(screen.getByText('PRONTO')).toBeInTheDocument();
+});
+
+test('completed REC is nonblocking; archive opens only on demand and closes independently',()=>{
+ const exportFile=jest.fn(),file={id:'one',name:'vinil.wav'};
+ render(<StreamDisplay geometry={{x:234,y:280,width:1812,height:1440}} baseWidth={3070} baseHeight={2048} capture={idle} recording={{status:'available',file,exportFile}} network={{role:'receive',status:'PLAYING',sourceKind:'voice'}}/>);
+ expect(screen.getByText('RECEBENDO')).toBeInTheDocument();expect(screen.queryByRole('dialog')).not.toBeInTheDocument();expect(screen.queryByText(/BUFFER/)).not.toBeInTheDocument();
+ fireEvent.click(screen.getByText('EXPORTAR WAV'));expect(screen.getByRole('dialog')).toBeInTheDocument();
+ fireEvent.click(screen.getByText('EXPORTAR WAV'));expect(exportFile).toHaveBeenCalledTimes(1);
+ fireEvent.click(screen.getByText('VOLTAR'));expect(screen.getByText('RECEBENDO')).toBeInTheDocument();
 });
