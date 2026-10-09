@@ -536,9 +536,10 @@ export default function App() {
           <button type="button" aria-label="Abrir controles do player"
             onClick={()=>{setPlaylistOpen(true);openStream();}}
             style={{position:'absolute',left:`${RADIO.NP_LEFT}%`,right:`${RADIO.NP_RIGHT}%`,
-              top:`${RADIO.NP_TOP}%`,bottom:`${RADIO.NP_BOT}%`,display:'flex',alignItems:'center',
-              gap:'5%',padding:'0 2%',border:0,background:'transparent',color:digitalTheme.color,
-              overflow:'hidden',fontFamily:"'Oswald',sans-serif",fontSize:'clamp(10px,1.4vw,18px)',cursor:'pointer'}}>
+              top:`${RADIO.NP_TOP}%`,bottom:`${RADIO.NP_BOT}%`,display:'grid',alignItems:'center',
+              gridTemplateColumns:queue.length>0?'auto minmax(0,1fr)':'minmax(0,1fr)',
+              gap:'5%',padding:'0 2%',margin:0,border:0,boxShadow:'none',appearance:'none',background:'transparent',color:digitalTheme.color,
+              contain:'paint',overflow:'hidden',textAlign:'left',fontFamily:"'Oswald',sans-serif",fontSize:'clamp(10px,1.4vw,18px)',cursor:'pointer'}}>
             {queue.length>0 && <span style={{flexShrink:0,fontSize:'0.75em'}}>{String(queueIndex+1).padStart(2,'0')}/{String(queue.length).padStart(2,'0')}</span>}
             <span title={trackName} style={{minWidth:0,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{trackName||'LOAD / ABRIR'}</span>
           </button>

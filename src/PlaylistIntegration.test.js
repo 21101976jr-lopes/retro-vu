@@ -10,6 +10,20 @@ beforeEach(()=>{
  URL.createObjectURL=jest.fn(f=>'blob:'+f.name);URL.revokeObjectURL=jest.fn();jest.spyOn(window,'requestAnimationFrame').mockReturnValue(1);jest.spyOn(window,'cancelAnimationFrame').mockImplementation(()=>{});
 });
 afterEach(()=>{jest.restoreAllMocks();delete window.AudioContext;});
+test('RADIO confines empty label, counter and long filename to the original display',()=>{
+ render(<App/>);
+ const display=screen.getByRole('button',{name:'Abrir controles do player'});
+ expect(display).toHaveTextContent(/^LOAD \/ ABRIR$/);
+ expect(screen.queryByText(/^PLAYLIST$/i)).not.toBeInTheDocument();
+ expect(display).toHaveStyle({left:'32.85%',right:'32.62%',top:'50.25%',bottom:'41.73%',overflow:'hidden',contain:'paint',background:'transparent',border:'0px'});
+ const name='Uma música com um nome muito comprido para conferir o recorte do visor';
+ fireEvent.change(screen.getByLabelText('Arquivos de áudio'),{target:{files:[new File(['a'],name+'.wav',{type:'audio/wav'})]}});
+ expect(display).toHaveTextContent('01/01');
+ expect(display).toContainElement(screen.getByTitle(name));
+ expect(screen.getByTitle(name)).toHaveStyle({minWidth:'0',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'});
+ expect(display).toHaveStyle({gridTemplateColumns:'auto minmax(0,1fr)'});
+ expect(screen.queryByText(/^PLAYLIST$/i)).not.toBeInTheDocument();
+});
 test('multi-file player retains source and transmission through next track and navigation',async()=>{
  const view=render(<App/>);const files=[new File(['a'],'first.wav',{type:'audio/wav'}),new File(['b'],'second.webm',{type:'audio/webm'})];
  fireEvent.change(screen.getByLabelText('Arquivos de áudio'),{target:{files}});
