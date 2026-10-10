@@ -1,4 +1,11 @@
 import {openAudioFile,openAudioFolder,AUDIO_TYPES} from './filePicker';
+test('folder walks subfolders once and preserves different files with the same name',async()=>{
+ const a=new File(['a'],'song.wav'),b=new File(['bb'],'song.wav');
+ const child={kind:'directory',name:'LP',async *values(){yield {kind:'file',name:b.name,getFile:async()=>b};}};
+ window.showDirectoryPicker=jest.fn().mockResolvedValue({async *values(){yield {kind:'file',name:a.name,getFile:async()=>a};yield child;yield child;}});
+ const change=jest.fn();await openAudioFolder(null,change);
+ expect(change.mock.calls[0][0].target.files).toEqual([a,b]);
+});
 afterEach(()=>{delete window.showOpenFilePicker;delete window.showDirectoryPicker;});
 
 test('folder automatically loads audio and handles empty, denied and cancelled choices without another prompt',async()=>{

@@ -10,6 +10,8 @@ import useStreamInput from './useStreamInput';
 import useStreamNetwork from './useStreamNetwork';
 import useStreamRecorder from './useStreamRecorder';
 import useLiveProgress from './useLiveProgress';
+import AudioLoadChoice from './AudioLoadChoice';
+import RadioTrackName from './RadioTrackName';
 
 // ═══════════════════════════════════════════════════════════════════
 // CONFIGURAÇÃO — ajuste aqui para afinar posições
@@ -88,7 +90,7 @@ export default function App() {
     process.env.NODE_ENV === 'development' &&
     new URLSearchParams(window.location.search).get('stream-calibration') === '1'
       ? 'stream' : 'radio');
-  const [audioMode,   setAudioMode]   = useState('mic');
+  const [audioMode,   setAudioMode]   = useState('player');
   const [isPowered,   setIsPowered]   = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isPlaying,   setIsPlaying]   = useState(false);
@@ -102,22 +104,27 @@ export default function App() {
   const [playerSession,setPlayerSession]=useState(null);
   const [playerSending,setPlayerSending]=useState(false);
   const [playerMonitor,setPlayerMonitor]=useState(false);
-  const activeSession=sourceKind==='voice'?voice.session:sourceKind==='player'?(playerSending?playerSession:null):streamInput.session;
+  const [voiceSending,setVoiceSending]=useState(false);
+  const pendingPlayerTransmit=useRef(false);
+  const sourceRevision=useRef(0);
+  const activeSession=sourceKind==='voice'?(voiceSending?voice.session:null):sourceKind==='player'?(playerSending?playerSession:null):streamInput.session;
   const capture=sourceKind==='voice'?{...voice,kind:'voice'}:sourceKind==='player'?{
     status:playerSending?'READY':'STANDBY',settings:playerSession?.settings||{},signal:0,session:activeSession,kind:'player',monitor:playerMonitor
   }:{...streamInput,kind:'usb'};
   const streamNetwork = useStreamNetwork(activeSession);
-  const recording = useStreamRecorder(activeSession || streamNetwork.recordingSession);
-  const liveActive = ['OPENING', 'READY'].includes(capture.status);
+  const recording = useStreamRecorder(streamNetwork.role==='receive'?streamNetwork.recordingSession:sourceKind==='voice'?voice.session:sourceKind==='player'?playerSession:streamInput.session);
+  const liveActive = sourceKind==='voice'?voiceSending:sourceKind==='player'?playerSending:['OPENING', 'READY'].includes(capture.status);
   const [playlistOpen,setPlaylistOpen]=useState(false);
   const [pickerMessage,setPickerMessage]=useState('');
+  const [loadStage,setLoadStage]=useState(null);
+  const loadMode=useRef('replace');
   const [queue,setQueue]=useState([]),[queueIndex,setQueueIndex]=useState(0);
   const [repeat,setRepeat]=useState(false),[shuffle,setShuffle]=useState(false);
   const playlistRef=useRef({files:[],index:0,repeat:false,shuffle:false});
   playlistRef.current.repeat=repeat;playlistRef.current.shuffle=shuffle;
-  useEffect(()=>{setPwaBusy(liveActive || Boolean(streamNetwork.role) || isPlaying || isListening || ['starting','recording','finalizing'].includes(recording.status));},[liveActive,streamNetwork.role,isPlaying,isListening,recording.status]);
+  useEffect(()=>{setPwaBusy(liveActive || Boolean(voice.session) || Boolean(streamNetwork.role) || isPlaying || isListening || ['starting','recording','finalizing'].includes(recording.status));},[liveActive,voice.session,streamNetwork.role,isPlaying,isListening,recording.status]);
   const livePosition = useLiveProgress(liveActive);
-  const streamAnalyser = activeSession?.analyser || streamNetwork.analyser;
+  const streamAnalyser = streamNetwork.analyser || (sourceKind==='voice'?voice.session?.analyser:activeSession?.analyser);
   const streamAnalyserRef = useRef(null);
   streamAnalyserRef.current = streamAnalyser;
   const [vuReady,     setVuReady]     = useState(false);
@@ -131,7 +138,6 @@ export default function App() {
 
   const audioCtxRef     = useRef(null);
   const analyserRef     = useRef(null);
-  const micStreamRef    = useRef(null);
   const audioElRef      = useRef(null);
   const audioElSrcRef   = useRef(null);
   const animRef         = useRef(null);
@@ -302,29 +308,12 @@ export default function App() {
     requestAnimationFrame(ret);
   }, []);
 
-  const startMic = useCallback(async () => {
-    if (streamAnalyserRef.current) { startAnim(); return; }
-    try {
-      ensureCtx();
-      // Desconecta analyser da saída para evitar eco do microfone
-      try { analyserRef.current?.disconnect(audioCtxRef.current.destination); } catch {}
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      micStreamRef.current = stream;
-      audioCtxRef.current.createMediaStreamSource(stream).connect(analyserRef.current);
-      setIsListening(true); startAnim();
-    } catch { alert('Microfone não acessível. Verifique permissões (requer HTTPS).'); }
-  }, [ensureCtx, startAnim]);
-
-  const stopMic = useCallback(() => {
-    micStreamRef.current?.getTracks().forEach(t => t.stop());
-    micStreamRef.current = null;
-    setIsListening(false); stopAnim();
-  }, [stopAnim]);
-
   const playbackRef=useRef(null);
   const playbackRevision=useRef(0);
   const handlePlay = useCallback(() => {
     if (!audioElRef.current) { alert('Carregue uma música primeiro (LOAD / ABRIR).'); return; }
+    if(voice.session || voice.status==='OPENING'){voice.stop();setVoiceSending(false);}
+    if(!streamInput.session)setSourceKind('player');
     ensureCtx();
     if (!audioElSrcRef.current) {
       const src=audioCtxRef.current.createMediaElementSource(audioElRef.current);
@@ -344,7 +333,7 @@ export default function App() {
       setIsPlaying(false);setIsListening(false);alert('Erro: '+err.message);
     });
     setAudioMode('player');
-  }, [ensureCtx,startAnim]);
+  }, [ensureCtx,startAnim,voice,streamInput.session]);
   playbackRef.current=handlePlay;
   const loadTrack=useCallback((index,play=false)=>{
     const list=playlistRef.current,file=list.files[index];if(!file)return;
@@ -370,18 +359,46 @@ export default function App() {
   const handleFileChange=useCallback(e=>{
     const files=Array.from(e.target.files||[]).filter(f=>f.type.startsWith('audio/')||/\.(mp3|m4a|wav|flac|aac|webm)$/i.test(f.name));
     if(!files.length)return;
-    playlistRef.current.files=files;setQueue(files);loadTrack(0,Boolean(audioElRef.current&&!audioElRef.current.paused));e.target.value='';
+    const append=loadMode.current==='append'&&playlistRef.current.files.length>0;
+    const next=append?[...playlistRef.current.files,...files]:files;
+    playlistRef.current.files=next;setQueue(next);setLoadStage(null);setPickerMessage(`${next.length} músicas carregadas`);
+    if(!append)loadTrack(0,pendingPlayerTransmit.current||Boolean(audioElRef.current&&!audioElRef.current.paused));
+    if(pendingPlayerTransmit.current){pendingPlayerTransmit.current=false;setPlayerMonitor(true);setPlayerSending(true);setPlaylistOpen(false);}
+    e.target.value='';
   },[loadTrack]);
   const handlePause=useCallback(()=>{playbackRevision.current++;audioElRef.current?.pause();setIsPlaying(false);setIsListening(false);stopAnim();},[stopAnim]);
   const handleStop=useCallback(()=>{playbackRevision.current++;audioElRef.current?.pause();if(audioElRef.current)audioElRef.current.currentTime=0;setIsPlaying(false);setIsListening(false);setProgress(0);stopAnim();},[stopAnim]);
   useEffect(()=>()=>{audioElRef.current?.pause();if(audioElRef.current?.src)URL.revokeObjectURL(audioElRef.current.src);audioCtxRef.current?.close().catch(()=>{});},[]);
   function stepTrack(direction){const q=playlistRef.current;const index=nextTrack(q.index,q.files.length,{direction,repeat:true,shuffle:direction>0&&q.shuffle});if(index!==null)loadTrack(index,isPlaying);}
-  async function stopSource(){const pending=recording.stop();if(pending)await pending;streamNetwork.stop();streamInput.stop();voice.stop();if(playerSending&&!playerMonitor)audioElSrcRef.current?.connect(audioCtxRef.current.destination);setPlayerSending(false);setPlayerMonitor(false);}
+  function openLoad(){setPickerMessage('');setLoadStage(playlistRef.current.files.length?'mode':'source');loadMode.current='replace';}
+  function chooseLoadMode(mode){loadMode.current=mode;setLoadStage('source');}
+  function cancelLoad(){pendingPlayerTransmit.current=false;setLoadStage(null);}
+  function selectFiles(){openAudioFile(fileInputRef.current,handleFileChange);}
+  function selectFolder(){openAudioFolder(fileInputRef.current,handleFileChange,setPickerMessage);}
+  async function selectMic(){
+    const revision=++sourceRevision.current;
+    const transmitting=liveActive||streamNetwork.role==='send';
+    if(sourceKind!=='voice')await recording.stop();
+    if(revision!==sourceRevision.current)return;
+    handlePause();streamInput.stop();
+    if(playerSending&&!playerMonitor)audioElSrcRef.current?.connect(audioCtxRef.current.destination);
+    setPlayerSending(false);setPlayerMonitor(false);setVoiceSending(transmitting);setSourceKind('voice');setAudioMode('mic');
+    voice.start();
+  }
+  async function selectPlayer(){
+    const revision=++sourceRevision.current;
+    if(sourceKind==='voice')await recording.stop();
+    if(revision!==sourceRevision.current)return;
+    voice.stop();setVoiceSending(false);setAudioMode('player');
+    if(sourceKind==='voice'){setSourceKind('player');streamNetwork.stop();}
+  }
+  async function stopSource(){pendingPlayerTransmit.current=false;const pending=recording.stop();if(pending)await pending;streamNetwork.stop();streamInput.stop();voice.stop();setVoiceSending(false);if(playerSending&&!playerMonitor)audioElSrcRef.current?.connect(audioCtxRef.current.destination);setPlayerSending(false);setPlayerMonitor(false);}
   function beginTransmit(kind='usb'){
     setSourceKind(kind);
-    if(kind==='usb'){handlePause();streamInput.toggleCapture();}
-    else if(kind==='voice'){handlePause();stopMic();voice.start();}
-    else if(!audioElRef.current){setPlaylistOpen(true);}
+    pendingPlayerTransmit.current=false;
+    if(kind==='usb'){voice.stop();setVoiceSending(false);handlePause();streamInput.toggleCapture();}
+    else if(kind==='voice'){handlePause();setAudioMode('mic');setVoiceSending(true);voice.start();}
+    else if(!audioElRef.current){voice.stop();setVoiceSending(false);pendingPlayerTransmit.current=true;setPlaylistOpen(true);openLoad();}
     else{handlePlay();setPlayerMonitor(true);setPlayerSending(true);}
   }
   function toggleMonitor(){
@@ -393,42 +410,17 @@ export default function App() {
       setPlayerMonitor(!playerMonitor);
     }
   }
-  const lights=radioLights({kind:activeSession?sourceKind:streamNetwork.role==='receive'?streamNetwork.sourceKind:null,
+  const lights=radioLights({kind:voice.session&&sourceKind==='voice'?'voice':activeSession?sourceKind:streamNetwork.role==='receive'?streamNetwork.sourceKind:audioMode==='player'?'player':null,
     muted:streamNetwork.role==='receive'?streamNetwork.voiceMuted:voice.muted,localPlaying:isPlaying,legacyMic:audioMode==='mic'&&isListening&&!isPlaying,
     receiving:streamNetwork.role==='receive'&&streamNetwork.status==='PLAYING'&&streamNetwork.playing&&!streamNetwork.voiceMuted,
     monitor:Boolean(capture.monitor),playerSending});
 
   // POWER – música NÃO para ao trocar de tela
-  const handlePower = useCallback(() => {
-    if (streamAnalyserRef.current) {
-      if (isPowered) pauseAnim(); else startAnim();
-      setIsPowered(!isPowered); setScreen(isPowered ? 'radio' : 'vu');
-      return;
-    }
-    if (isPowered) {
-      // Voltando para o rádio
-      if (audioMode === 'mic') {
-        stopMic();
-      } else {
-        pauseAnim(); // só pausa animação, música continua tocando
-      }
-      setIsPowered(false); setScreen('radio');
-    } else {
-      // Indo para o VU
-      setIsPowered(true); setScreen('vu');
-      if (audioMode === 'mic') {
-        startMic();
-      } else if (audioElRef.current) {
-        if (isPlaying) {
-          startAnim(); // música já tocando, só reinicia animação
-        } else {
-          handlePlay();
-        }
-      }
-    }
-  }, [isPowered, audioMode, isPlaying, startMic, stopMic, startAnim, pauseAnim, handlePlay]);
-
-  useEffect(() => () => { stopMic(); stopAnim(); }, [stopMic, stopAnim]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handlePower = () => {
+    if(isPowered)pauseAnim();else startAnim();
+    setIsPowered(!isPowered);setScreen(isPowered?'radio':'vu');
+  };
+  useEffect(() => () => { if(animRef.current)cancelAnimationFrame(animRef.current); }, []);
 
   useEffect(() => {
     if (streamAnalyser && (screen === 'vu' || screen === 'strobe')) startAnim();
@@ -478,8 +470,8 @@ export default function App() {
         <div style={panelStyle(STREAM.WIDTH / STREAM.HEIGHT)}>
           <img src="/images/stream.png" alt="STREAM" style={S.bg} draggable={false} />
           <input aria-label="Arquivos de áudio" ref={fileInputRef} type="file" accept="audio/*" multiple style={{display:'none'}} onChange={handleFileChange} />
-          <StreamDisplay playlist={playlistOpen?{name:trackName,index:queueIndex,length:queue.length,repeat,shuffle,playing:isPlaying,
-            message:pickerMessage,files:()=>{setPickerMessage('');openAudioFile(fileInputRef.current,handleFileChange);},folder:()=>openAudioFolder(fileInputRef.current,handleFileChange,setPickerMessage),
+          <StreamDisplay openPlayer={()=>setPlaylistOpen(true)} playlist={playlistOpen?{name:trackName,index:queueIndex,length:queue.length,repeat,shuffle,playing:isPlaying,
+            message:pickerMessage,loadStage,openLoad,chooseMode:chooseLoadMode,cancelLoad,files:selectFiles,folder:selectFolder,
             previous:()=>stepTrack(-1),next:()=>stepTrack(1),toggleRepeat:()=>setRepeat(!repeat),toggleShuffle:()=>setShuffle(!shuffle),
             play:isPlaying?handlePause:handlePlay,close:()=>setPlaylistOpen(false)}:null} recording={recording} network={streamNetwork} capture={capture} geometry={STREAM.DISPLAY} baseWidth={STREAM.WIDTH} baseHeight={STREAM.HEIGHT} />
           {/* Hotspots definitivos. VOLTAR apenas navega; as sessões de áudio são globais. */}
@@ -490,9 +482,9 @@ export default function App() {
                 : label === 'MONITOR' ? capture.monitor
                 : label === 'RECEBER' ? streamNetwork.role === 'receive'
                 : label === 'PLAY / STOP' && streamNetwork.role === 'receive' ? streamNetwork.playing : undefined}
-              onClick={label === 'VOLTAR' ? () => {setPlaylistOpen(false);setScreen('radio');}
-                : label === 'TRANSMITIR' ? () => { if(liveActive)stopSource();else streamNetwork.requestTransmit(beginTransmit); }
-                : label === 'RECEBER' ? async () => { const pending = recording.stop(); if (pending) await pending; streamInput.stop();voice.stop();handlePause();if(playerSending&&!playerMonitor)audioElSrcRef.current?.connect(audioCtxRef.current.destination);setPlayerSending(false);setPlayerMonitor(false); if (streamNetwork.role === 'send') streamNetwork.stop(); streamNetwork.toggleReceive(); }
+              onClick={label === 'VOLTAR' ? () => {setPlaylistOpen(false);setLoadStage(null);setScreen('radio');}
+                : label === 'TRANSMITIR' ? () => { setPlaylistOpen(false);if(liveActive)stopSource();else streamNetwork.requestTransmit(beginTransmit); }
+                : label === 'RECEBER' ? async () => { pendingPlayerTransmit.current=false;const pending = recording.stop(); if (pending) await pending; streamInput.stop();voice.stop();setVoiceSending(false);handlePause();if(playerSending&&!playerMonitor)audioElSrcRef.current?.connect(audioCtxRef.current.destination);setPlayerSending(false);setPlayerMonitor(false); if (streamNetwork.role === 'send') streamNetwork.stop(); streamNetwork.toggleReceive(); }
                 : label === 'PLAY / STOP' ? streamNetwork.role==='receive'?streamNetwork.togglePlay:audioElRef.current?()=>audioElRef.current.paused?handlePlay():handlePause():undefined
                 : label === 'MONITOR' ? toggleMonitor
                 : label === 'REC' ? recording.toggle : undefined}
@@ -533,16 +525,18 @@ export default function App() {
           <Led xPct={RADIO.LED_STATUS_X} yPct={RADIO.LED_STATUS_Y} wPct={RADIO.LED_LARGE_W} on={lights.listening} />
 
           {/* Visor original: contador e nome do arquivo, sem painel externo. */}
-          <button type="button" aria-label="Abrir controles do player"
-            onClick={()=>{setPlaylistOpen(true);openStream();}}
+          <div className="radio-display" role="group" aria-label="Visor RADIO"
             style={{position:'absolute',left:`${RADIO.NP_LEFT}%`,right:`${RADIO.NP_RIGHT}%`,
               top:`${RADIO.NP_TOP}%`,bottom:`${RADIO.NP_BOT}%`,display:'grid',alignItems:'center',
-              gridTemplateColumns:queue.length>0?'auto minmax(0,1fr)':'minmax(0,1fr)',
+              gridTemplateColumns:loadStage?'minmax(0,1fr)':queue.length>0?'auto minmax(0,1fr) auto auto':'minmax(0,1fr)',
               gap:'5%',padding:'0 2%',margin:0,border:0,boxShadow:'none',appearance:'none',background:'transparent',color:digitalTheme.color,
               contain:'paint',overflow:'hidden',textAlign:'left',fontFamily:"'Oswald',sans-serif",fontSize:'clamp(10px,1.4vw,18px)',cursor:'pointer'}}>
-            {queue.length>0 && <span style={{flexShrink:0,fontSize:'0.75em'}}>{String(queueIndex+1).padStart(2,'0')}/{String(queue.length).padStart(2,'0')}</span>}
-            <span title={trackName} style={{minWidth:0,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{trackName||'LOAD / ABRIR'}</span>
-          </button>
+            {loadStage?<AudioLoadChoice stage={loadStage} onMode={chooseLoadMode} onFiles={selectFiles} onFolder={selectFolder} onClose={cancelLoad}/>:<>
+             {queue.length>0 && <span style={{fontSize:'0.75em'}}>{String(queueIndex+1).padStart(2,'0')}/{String(queue.length).padStart(2,'0')}</span>}
+             <RadioTrackName name={trackName} onClick={()=>{setPlaylistOpen(true);openStream();}}/>
+             {queue.length>0 && <><button aria-label="Faixa anterior" onClick={()=>stepTrack(-1)}>◀</button><button aria-label="Próxima faixa" onClick={()=>stepTrack(1)}>▶</button></>}
+            </>}
+          </div>
 
           {/* Display digital de sensibilidade — Illustrator */}
           <div style={{
@@ -576,27 +570,27 @@ export default function App() {
                style={{ ...S.hs, left: '3%', top: '7%', width: '17%', height: '28%' }} />
 
           {/* MIC */}
-          <div onClick={() => { setAudioMode('mic'); if (isPlaying) handlePause(); }}
+          <div role="button" aria-label="MIC" onClick={selectMic}
                style={{ ...S.hs, right: '14%', top: '5%', width: '14%', height: '19%' }} />
 
           {/* PLAYER */}
-          <div onClick={() => setAudioMode('player')}
+          <div role="button" aria-label="PLAYER" onClick={selectPlayer}
                style={{ ...S.hs, right: '14%', top: '24%', width: '14%', height: '18%' }} />
 
           {/* LOAD */}
-          <div onClick={() => openAudioFile(fileInputRef.current, handleFileChange)}
+          <div role="button" aria-label="LOAD / ABRIR" onClick={openLoad}
                style={{ ...S.hs, left: '3%', top: '43%', width: '20%', height: '26%' }} />
 
           {/* STOP */}
-          <div onClick={handleStop}
+          <div role="button" aria-label="STOP" onClick={handleStop}
                style={{ ...S.hs, left: '31%', top: '61%', width: '11%', height: '19%' }} />
 
           {/* PLAY */}
-          <div onClick={handlePlay}
+          <div role="button" aria-label="PLAY" onClick={handlePlay}
                style={{ ...S.hs, left: '42%', top: '61%', width: '16%', height: '19%' }} />
 
           {/* PAUSE */}
-          <div onClick={handlePause}
+          <div role="button" aria-label="PAUSE" onClick={handlePause}
                style={{ ...S.hs, left: '57%', top: '61%', width: '11%', height: '19%' }} />
 
           {/* SENSIBILIDADE + — Illustrator: centro 862.496×490.072mm */}
@@ -758,7 +752,7 @@ export default function App() {
 
           {/* Hotspot VOLTAR — canto inferior esquerdo (usuário adiciona imagem do botão) */}
           <div
-            onClick={() => { setIsPowered(false); setScreen('radio'); if(audioMode==='mic') stopMic(); else pauseAnim(); }}
+            onClick={() => { setIsPowered(false); setScreen('radio'); pauseAnim(); }}
             style={{
               position: 'absolute',
               left: '1%',

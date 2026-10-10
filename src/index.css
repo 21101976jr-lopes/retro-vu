@@ -21,3 +21,13 @@ body {
 .screen-fade {
   animation: fadeIn 0.12s ease-out;
 }
+
+.radio-track-name { min-width:0; overflow:hidden; white-space:nowrap; text-align:left; }
+.radio-track-name span { display:inline-block; }
+.radio-track-scroll { animation:radio-track-scroll var(--track-duration) linear infinite alternate; }
+@keyframes radio-track-scroll { 0%,15% { transform:translateX(0); } 85%,100% { transform:translateX(var(--track-shift)); } }
+@media(prefers-reduced-motion:reduce) { .radio-track-scroll { animation:none; } }
+.radio-display button { background:transparent; color:inherit; font:inherit; border:0; padding:0; cursor:pointer; }
+.audio-load-choice { display:flex; align-items:center; gap:3%; width:100%; min-width:0; }
+.audio-load-choice button { flex:1; min-width:0; color:inherit; background:transparent; border:1px solid currentColor; font:inherit; font-size:.75em; padding:.25em; cursor:pointer; }
+.audio-load-choice button:last-child { flex:0 0 8%; }

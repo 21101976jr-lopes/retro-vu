@@ -1,0 +1,71 @@
+import {act,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
+import App from './App';
+import {StreamTransport} from './stream/transport';
+import {WavRecorder} from './recording/WavRecorder';
+import {exportRecording,loadRecordings} from './recording/archive';
+jest.mock('./recording/WavRecorder',()=>({WavRecorder:jest.fn()}));
+jest.mock('./recording/archive',()=>({loadRecordings:jest.fn().mockResolvedValue([]),exportRecording:jest.fn(),deleteRecording:jest.fn()}));
+jest.mock('./stream/transport',()=>({StreamTransport:jest.fn()}));
+jest.mock('./stream/invitation',()=>({newInvitation:async()=>({invite:'a'.repeat(64),owner:'b'.repeat(64)}),pendingInvitation:()=>'',invitationURL:()=>''}));
+let images,audio,contexts,track;
+beforeEach(()=>{
+ loadRecordings.mockResolvedValue([]);
+ images=[];contexts=[];
+ jest.spyOn(window,'Image').mockImplementation(()=>{const i={decode:jest.fn().mockResolvedValue()};images.push(i);return i;});
+ const node=()=>({connect:jest.fn(),disconnect:jest.fn(),fftSize:2048,getByteTimeDomainData:a=>a.fill(128)});
+ window.AudioContext=jest.fn(()=>{const ctx={state:'running',sampleRate:48000,destination:{},resume:jest.fn().mockResolvedValue(),close:jest.fn().mockResolvedValue(),createAnalyser:node,createGain:node,createMediaStreamSource:jest.fn(node),createMediaElementSource:jest.fn(node)};contexts.push(ctx);return ctx;});
+ jest.spyOn(window,'Audio').mockImplementation(()=>{audio=new EventTarget();audio.paused=true;audio.play=jest.fn(async()=>{audio.paused=false;});audio.pause=jest.fn(()=>{audio.paused=true;});return audio;});
+ track={readyState:'live',getSettings:()=>({channelCount:1,sampleRate:48000}),addEventListener:jest.fn(),stop:jest.fn()};
+ Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{enumerateDevices:jest.fn().mockResolvedValue([]),getUserMedia:jest.fn().mockResolvedValue({getTracks:()=>[track],getAudioTracks:()=>[track]})}});
+ URL.createObjectURL=jest.fn(f=>'blob:'+f.name);URL.revokeObjectURL=jest.fn();
+ jest.spyOn(window,'requestAnimationFrame').mockReturnValue(1);jest.spyOn(window,'cancelAnimationFrame').mockImplementation(()=>{});
+ StreamTransport.mockClear();StreamTransport.mockImplementation((role,source,update)=>({role,start:()=>update({role,status:'WAITING'}),close:jest.fn()}));
+ WavRecorder.mockClear();WavRecorder.mockImplementation((session,update)=>({session,start:async()=>update({status:'recording'}),stop:async()=>{update({status:'finalizing'});await Promise.resolve();update({status:'available',file:{id:'saved',name:'saved.wav',url:'blob:saved'}});},dispose:jest.fn()}));
+});
+afterEach(()=>{jest.restoreAllMocks();delete window.AudioContext;delete window.showDirectoryPicker;delete window.showOpenFilePicker;});
+async function stream(){fireEvent.click(screen.getByRole('button',{name:'STREAM',exact:true}));await act(async()=>images.find(i=>i.src==='/images/stream.png').onload());}
+async function transmit(kind){fireEvent.click(screen.getByRole('button',{name:'TRANSMITIR',exact:true}));fireEvent.click(screen.getByRole('button',{name:kind,exact:true}));fireEvent.click(within(screen.getByRole('dialog',{name:'Transmitir áudio'})).getByRole('button',{name:'TRANSMITIR',exact:true}));await act(async()=>{await Promise.resolve();});}
+test('folder → RADIO arrows → STREAM arrows → append/cancel replace → open PLAYER transmission uses one source',async()=>{
+ render(<App/>);const files=['a.wav','b.wav','c.wav'].map(n=>new File(['pcm'],n,{type:'audio/wav'}));
+ window.showDirectoryPicker=jest.fn().mockResolvedValue({async *values(){for(const file of files)yield {kind:'file',name:file.name,getFile:async()=>file};}});
+ fireEvent.click(screen.getByRole('button',{name:'LOAD / ABRIR'}));fireEvent.click(screen.getByText('PASTA'));
+ await waitFor(()=>expect(screen.getByRole('group',{name:'Visor RADIO'})).toHaveTextContent('01/03'));
+ fireEvent.click(screen.getByRole('button',{name:'PLAY',exact:true}));await act(async()=>{await Promise.resolve();});
+ fireEvent.click(screen.getByLabelText('Próxima faixa'));await act(async()=>{await Promise.resolve();});expect(audio.src).toBe('blob:b.wav');
+ fireEvent.click(screen.getByLabelText('Faixa anterior'));await act(async()=>{await Promise.resolve();});expect(audio.src).toBe('blob:a.wav');
+ fireEvent.click(screen.getByLabelText('Abrir controles do player'));await act(async()=>images.find(i=>i.src==='/images/stream.png').onload());
+ fireEvent.click(screen.getByText('PRÓXIMA ▶'));await act(async()=>{await Promise.resolve();});
+ fireEvent.click(screen.getByRole('button',{name:'VOLTAR',exact:true}));expect(screen.getByRole('group',{name:'Visor RADIO'})).toHaveTextContent('02/03');
+ const pauseCount=audio.pause.mock.calls.length;
+ window.showOpenFilePicker=jest.fn().mockResolvedValue([{getFile:async()=>new File(['d'],'d.wav',{type:'audio/wav'})}]);
+ fireEvent.click(screen.getByRole('button',{name:'LOAD / ABRIR'}));fireEvent.click(screen.getByText('ADICIONAR MAIS'));fireEvent.click(screen.getByText('MÚSICAS'));
+ await waitFor(()=>expect(screen.getByRole('group',{name:'Visor RADIO'})).toHaveTextContent('02/04'));expect(audio.src).toBe('blob:b.wav');expect(audio.pause).toHaveBeenCalledTimes(pauseCount);
+ window.showOpenFilePicker.mockRejectedValue(new DOMException('cancel','AbortError'));
+ fireEvent.click(screen.getByRole('button',{name:'LOAD / ABRIR'}));fireEvent.click(screen.getByText('SUBSTITUIR TUDO'));fireEvent.click(screen.getByText('MÚSICAS'));await act(async()=>{await Promise.resolve();});fireEvent.click(screen.getByLabelText('Cancelar seleção'));
+ expect(screen.getByRole('group',{name:'Visor RADIO'})).toHaveTextContent('02/04');
+ await stream();await transmit('PLAYER');await waitFor(()=>expect(StreamTransport).toHaveBeenCalledTimes(1));
+ expect(StreamTransport).toHaveBeenCalledWith('send',expect.objectContaining({kind:'player'}),expect.any(Function),expect.objectContaining({visibility:'open'}));
+ const pauses=audio.pause.mock.calls.length;
+ fireEvent.click(screen.getByRole('button',{name:'REC',exact:true}));await act(async()=>{await Promise.resolve();});
+ expect(screen.getByText('REC ATIVO')).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'REC',exact:true}));await screen.findByText('WAV PRESERVADO');
+ expect(screen.queryByRole('dialog')).not.toBeInTheDocument();expect(audio.pause).toHaveBeenCalledTimes(pauses);expect(audio.paused).toBe(false);expect(exportRecording).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'VOLTAR',exact:true}));fireEvent.click(screen.getByLabelText('Próxima faixa'));await act(async()=>{await Promise.resolve();});expect(StreamTransport).toHaveBeenCalledTimes(1);expect(contexts[0].createMediaElementSource).toHaveBeenCalledTimes(1);
+});
+test('TRANSMITIR → PLAYER before loading resumes the pending open transmission after selection',async()=>{
+ render(<App/>);await stream();await transmit('PLAYER');expect(StreamTransport).not.toHaveBeenCalled();
+ fireEvent.change(screen.getByLabelText('Arquivos de áudio'),{target:{files:[new File(['a'],'song.wav',{type:'audio/wav'})]}});
+ await waitFor(()=>expect(StreamTransport).toHaveBeenCalledTimes(1));expect(audio.paused).toBe(false);
+ expect(StreamTransport).toHaveBeenCalledWith('send',expect.objectContaining({kind:'player'}),expect.any(Function),expect.objectContaining({visibility:'open'}));
+ expect(screen.queryByRole('dialog',{name:'Playlist local'})).not.toBeInTheDocument();
+});
+test('RADIO MIC and STREAM voice transmission share one capture, PLAYER releases it without autoplay',async()=>{
+ render(<App/>);fireEvent.change(screen.getByLabelText('Arquivos de áudio'),{target:{files:[new File(['a'],'song.wav',{type:'audio/wav'})]}});
+ fireEvent.click(screen.getByRole('button',{name:'PLAY',exact:true}));await act(async()=>{await Promise.resolve();});
+ fireEvent.click(screen.getByRole('button',{name:'MIC',exact:true}));await waitFor(()=>expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1));await act(async()=>{await Promise.resolve();});
+ expect(audio.paused).toBe(true);expect(contexts[1].createMediaStreamSource).toHaveBeenCalledTimes(1);expect(StreamTransport).not.toHaveBeenCalled();
+ await stream();expect(screen.getByText('MIC ATIVO')).toBeInTheDocument();await transmit('MICROFONE');await waitFor(()=>expect(StreamTransport).toHaveBeenCalledTimes(1));expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+ fireEvent.click(screen.getByRole('button',{name:'VOLTAR',exact:true}));expect(track.stop).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'PLAYER',exact:true}));await act(async()=>{await Promise.resolve();});
+ expect(track.stop).toHaveBeenCalledTimes(1);expect(audio.paused).toBe(true);expect(screen.getByRole('group',{name:'Visor RADIO'})).toHaveTextContent('01/01');
+});

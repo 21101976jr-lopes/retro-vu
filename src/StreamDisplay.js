@@ -22,7 +22,7 @@ const ISSUES = {
   'AUDIO CONTEXT SUSPENDED': ['ÁUDIO PAUSADO', 'Toque em TRANSMITIR para tentar novamente.'],
 };
 
-export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture, network = {}, recording = {}, playlist = null }) {
+export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture, network = {}, recording = {}, playlist = null, openPlayer }) {
   const { theme, cycleTheme } = useDigitalTheme();
   const [recordingOpen,setRecordingOpen] = useState(false);
   const [recordingNotice,setRecordingNotice] = useState(false);
@@ -41,7 +41,7 @@ export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture
   const mode = issue ? 'error' : capture.status === 'OPENING' ? 'opening'
     : capture.monitor ? 'monitor' : ready ? 'capture' : 'idle';
   let title = issue ? issue[0] : {
-    idle: 'PRONTO', opening: capture.kind==='voice'?'ABRINDO MIC':'ABRINDO USB', capture: 'TRANSMITIR ATIVO', monitor: 'MONITOR ATIVO',
+    idle: 'PRONTO', opening: capture.kind==='voice'?'ABRINDO MIC':'ABRINDO USB', capture: capture.kind==='voice'&&!network.role?'MIC ATIVO':'TRANSMITIR ATIVO', monitor: 'MONITOR ATIVO',
   }[mode];
   let detail = issue ? issue[1] : {
     idle: 'Toque em TRANSMITIR para escolher a fonte.',
@@ -98,6 +98,7 @@ export default function StreamDisplay({ geometry, baseWidth, baseHeight, capture
         </p>}
       </div>
       {!issue && <footer className="stream-terminal-footer">
+        {openPlayer && <button type="button" onClick={openPlayer}>PLAYER LOCAL</button>}
         {ready && network.role === 'send' && <StreamNightMode />}
         {receiving && network.format && network.sourceKind!=='voice' ? <p className="stream-terminal-detail">BUFFER {Number(network.seconds || 0).toFixed(1)} s</p> : null}
         {ready && capture.kind==='voice' && <button className="stream-voice-toggle" aria-pressed={!capture.muted} onClick={capture.toggleMute}>{capture.muted?'ATIVAR MICROFONE':'SILENCIAR MICROFONE'}</button>}

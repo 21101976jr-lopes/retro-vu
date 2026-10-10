@@ -12,7 +12,7 @@ beforeEach(()=>{
 afterEach(()=>{jest.restoreAllMocks();delete window.AudioContext;});
 test('RADIO confines empty label, counter and long filename to the original display',()=>{
  render(<App/>);
- const display=screen.getByRole('button',{name:'Abrir controles do player'});
+ const display=screen.getByRole('group',{name:'Visor RADIO'});
  expect(display).toHaveTextContent(/^LOAD \/ ABRIR$/);
  expect(screen.queryByText(/^PLAYLIST$/i)).not.toBeInTheDocument();
  expect(display).toHaveStyle({left:'32.85%',right:'32.62%',top:'50.25%',bottom:'41.73%',overflow:'hidden',contain:'paint',background:'transparent',border:'0px'});
@@ -20,15 +20,15 @@ test('RADIO confines empty label, counter and long filename to the original disp
  fireEvent.change(screen.getByLabelText('Arquivos de áudio'),{target:{files:[new File(['a'],name+'.wav',{type:'audio/wav'})]}});
  expect(display).toHaveTextContent('01/01');
  expect(display).toContainElement(screen.getByTitle(name));
- expect(screen.getByTitle(name)).toHaveStyle({minWidth:'0',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'});
- expect(display).toHaveStyle({gridTemplateColumns:'auto minmax(0,1fr)'});
+ expect(screen.getByTitle(name)).toHaveClass('radio-track-name');
+ expect(display).toHaveStyle({gridTemplateColumns:'auto minmax(0,1fr) auto auto'});
  expect(screen.queryByText(/^PLAYLIST$/i)).not.toBeInTheDocument();
 });
 test('multi-file player retains source and transmission through next track and navigation',async()=>{
  const view=render(<App/>);const files=[new File(['a'],'first.wav',{type:'audio/wav'}),new File(['b'],'second.webm',{type:'audio/webm'})];
  fireEvent.change(screen.getByLabelText('Arquivos de áudio'),{target:{files}});
  expect(screen.queryByRole('button',{name:'Playlist',exact:true})).not.toBeInTheDocument();
- expect(screen.getByRole('button',{name:'Abrir controles do player'})).toHaveTextContent('01/02');
+ expect(screen.getByRole('group',{name:'Visor RADIO'})).toHaveTextContent('01/02');
  expect(screen.getByLabelText('Arquivos de áudio')).toHaveAttribute('multiple');
  fireEvent.click(screen.getByRole('button',{name:'STREAM',exact:true}));await act(async()=>images.find(i=>i.src==='/images/stream.png').onload());
  fireEvent.click(screen.getByRole('button',{name:'TRANSMITIR',exact:true}));await act(async()=>{await Promise.resolve();});
